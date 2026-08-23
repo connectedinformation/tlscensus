@@ -1,0 +1,21 @@
+# Build output
+/tlscensus
+/dist/
+*.exe
+
+# Go
+*.test
+*.out
+/coverage.*
+
+# Fuzzing corpus grows without bound; seeds live in testdata/fuzz.
+/internal/*/testdata/fuzz/*/[0-9a-f]*
+
+# Local captures. Never commit real traffic: a capture of a live network is
+# a record of who talked to whom, which is the exact data this tool exists
+# to treat carefully.
+*.pcap
+*.pcapng
+!testdata/sample.pcap
+
+.DS_Store

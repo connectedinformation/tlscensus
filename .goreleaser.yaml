@@ -1,0 +1,76 @@
+version: 2
+
+project_name: tlscensus
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: tlscensus
+    main: ./cmd/tlscensus
+    binary: tlscensus
+    # M1 is pure Go, so every target cross-compiles from one runner. When
+    # live capture lands (M2) the libpcap backend goes behind a build tag
+    # and this splits into a per-OS matrix with cgo enabled.
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    mod_timestamp: '{{ .CommitTimestamp }}'
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+      - NOTICE
+      - docs/*
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+brews:
+  - repository:
+      owner: tlscensus
+      name: homebrew-tap
+      token: '{{ .Env.HOMEBREW_TAP_TOKEN }}'
+    homepage: https://github.com/tlscensus/tlscensus
+    description: Passive TLS cryptography inventory
+    license: Apache-2.0
+    test: |
+      system "#{bin}/tlscensus", "version"
+
+nfpms:
+  - formats: [deb, rpm]
+    maintainer: The tlscensus Authors
+    homepage: https://github.com/tlscensus/tlscensus
+    description: Passive TLS cryptography inventory
+    license: Apache-2.0
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+
+release:
+  prerelease: auto
+  footer: |
+    ## Verifying
+
+    ```sh
+    sha256sum -c checksums.txt
+    ```
