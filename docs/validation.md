@@ -136,6 +136,20 @@ match on, a documented option never passed to the driver. Number 9 was not:
 nothing in the code says what order a driver enumerates adapters in, or that
 a Bluetooth radio would claim to be up. That had to be run.
 
+### Found by using it
+
+9. Observations were reported when a connection closed, not when its
+   handshake completed. Under TLS 1.3 nothing after the ServerHello is
+   visible, so the wait bought nothing — but a browser holds connections
+   open for minutes, so a live capture showed nothing for a site the
+   operator had just visited, and a connection outliving the capture never
+   appeared at all. Reading a capture file cannot show this: every
+   synthetic connection ends, and `Close` flushes the rest at end of file.
+   Fixed by reporting once the server's cleartext flight is complete —
+   ServerHello under TLS 1.3, ServerHelloDone under TLS 1.2 — and covered
+   by `testdata/keepalive.pcap`, which holds completed handshakes on
+   connections that are never closed.
+
 ### What the pattern says
 
 Three of these — 2, 5 and 6 — could not have been caught by any test in this

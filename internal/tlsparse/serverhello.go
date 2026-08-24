@@ -51,6 +51,26 @@ type ServerHello struct {
 	IsHelloRetryRequest bool `json:"is_hello_retry_request,omitempty"`
 	HasPreSharedKey     bool `json:"has_pre_shared_key,omitempty"`
 
+	// FlightComplete reports that the server has said everything it will
+	// ever say in the clear, so nothing is gained by waiting for more
+	// bytes on this connection.
+	//
+	// Under TLS 1.3 that is the ServerHello itself: Certificate,
+	// CertificateVerify and EncryptedExtensions all move under handshake
+	// encryption. Under TLS 1.2 it is ServerHelloDone, which closes the
+	// server's flight after Certificate and ServerKeyExchange.
+	//
+	// It exists so an observation can be reported as soon as it is
+	// complete rather than when the connection closes. A browser holds
+	// connections open for minutes, so waiting for the close means a live
+	// capture shows nothing for minutes after the handshake it just saw.
+	//
+	// A resumed TLS 1.2 session sends no ServerHelloDone — the server goes
+	// straight to ChangeCipherSpec — so those stay false and are reported
+	// when the connection ends. That is a latency cost on an uncommon case,
+	// not a loss.
+	FlightComplete bool `json:"flight_complete,omitempty"`
+
 	// CertificateChain holds the raw DER of the server's certificate chain,
 	// leaf first. Populated for TLS 1.2 and below only.
 	CertificateChain [][]byte `json:"-"`

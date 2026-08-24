@@ -376,6 +376,22 @@ func (s *stream) parse() {
 		j := 1 - s.clientIdx
 		if sh, err := tlsparse.FindServerHello(s.buf[j]); err == nil && sh != nil {
 			s.haveSH, s.flow.Server = true, sh
+			// Report as soon as the server has finished speaking in the
+			// clear, rather than when the connection closes.
+			//
+			// Waiting for the close was wrong in a way only live capture
+			// shows: a browser keeps connections open for minutes, so a
+			// handshake seen a second ago stayed unreported until the idle
+			// sweep. Nothing is learned in that interval — under TLS 1.3
+			// everything after ServerHello is encrypted — so the wait was
+			// pure latency, and a connection outliving the capture was lost
+			// from the live view entirely.
+			//
+			// The stream stays registered so its close is still processed;
+			// emit is idempotent.
+			if sh.FlightComplete {
+				s.emit()
+			}
 		}
 	}
 

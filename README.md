@@ -119,6 +119,13 @@ than no inventory.
 - **QUIC / HTTP-3 is not decoded yet** (M5). A meaningful share of modern
   TLS 1.3 traffic rides on QUIC, and it skews post-quantum. Until M5 lands,
   the readiness figure is biased *downward* on any network carrying HTTP/3.
+
+  This is not a subtle effect. Google, Cloudflare and many others advertise
+  `alt-svc: h3`, so a browser switches to QUIC after its first visit and
+  every later connection to that host becomes invisible — a site you just
+  loaded can be entirely absent from the report. Check with
+  `curl -sI https://host/ | grep alt-svc`: if it offers `h3`, expect to see
+  less of it than you should.
 - **No process attribution yet** (M6). Flows are identified by address and
   port, not by the application that opened them. On macOS the `pktap`
   pseudo-device would provide this nearly free; its link type is not decoded

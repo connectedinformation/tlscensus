@@ -60,6 +60,72 @@ var baseTime = time.Date(2026, 8, 23, 10, 0, 0, 0, time.UTC)
 func main() {
 	writeSample()
 	writeConcurrent()
+	writeKeepalive()
+}
+
+// writeKeepalive produces completed TLS 1.3 handshakes on connections that
+// are never closed.
+//
+// This is the shape of a browser keep-alive, and it is the case that showed
+// the assembler was reporting observations at connection close rather than
+// at handshake completion: the handshake is fully known, and under TLS 1.3
+// nothing further is visible, yet nothing was reported until the connection
+// ended or the idle sweep ran minutes later. A live capture therefore showed
+// nothing for a site the operator had just visited.
+func writeKeepalive() {
+	const flows = 4
+	out := "testdata/keepalive.pcap"
+	g, closeFile := newCapture(out)
+	defer closeFile()
+
+	for i := 0; i < flows; i++ {
+		host := fmt.Sprintf("keepalive%02d.example", i)
+		ch := tlssynth.ClientHelloSpec{
+			Ciphers:           []uint16{tlsAES128GCMSHA256, tlsChaCha20Poly1305},
+			SNI:               host,
+			ALPN:              []string{"h2"},
+			SupportedVersions: []uint16{tls13},
+			Groups:            []uint16{x25519MLKEM768, x25519},
+			KeyShares:         []uint16{x25519MLKEM768},
+			SigAlgs:           []uint16{0x0403, 0x0804},
+		}
+		sh := tlssynth.ServerHelloSpec{
+			Cipher: tlsAES128GCMSHA256, SelectedVersion: tls13,
+			Group: x25519MLKEM768, ALPN: "h2",
+		}
+		c2s := tlssynth.Records(tlssynth.RecordHandshake,
+			tlssynth.HandshakeMsg(tlssynth.MsgClientHello, tlssynth.ClientHello(ch)), mss)
+		s2c := tlssynth.Records(tlssynth.RecordHandshake,
+			tlssynth.HandshakeMsg(tlssynth.MsgServerHello, tlssynth.ServerHello(sh)), mss)
+
+		cIP := net.ParseIP("192.168.1.70")
+		sIP := net.ParseIP(fmt.Sprintf("203.0.113.%d", i+10))
+		sport := uint16(53000 + i)
+		var cSeq, sSeq uint32 = 1000, 5000
+
+		g.flows++
+		g.emit(cIP, sIP, sport, 443, cSeq, 0, tcpFlags{syn: true}, nil)
+		cSeq++
+		g.emit(sIP, cIP, 443, sport, sSeq, cSeq, tcpFlags{syn: true, ack: true}, nil)
+		sSeq++
+		g.emit(cIP, sIP, sport, 443, cSeq, sSeq, tcpFlags{ack: true}, nil)
+
+		for len(c2s) > 0 {
+			n := min(mss, len(c2s))
+			g.emit(cIP, sIP, sport, 443, cSeq, sSeq, tcpFlags{ack: true, psh: n == len(c2s)}, c2s[:n])
+			cSeq += uint32(n)
+			c2s = c2s[n:]
+		}
+		for len(s2c) > 0 {
+			n := min(mss, len(s2c))
+			g.emit(sIP, cIP, 443, sport, sSeq, cSeq, tcpFlags{ack: true, psh: n == len(s2c)}, s2c[:n])
+			sSeq += uint32(n)
+			s2c = s2c[n:]
+		}
+		// No FIN: the connection stays open, as a browser's would.
+	}
+
+	fmt.Printf("wrote %s (%d packets, %d keep-alive flows)\n", out, g.packets, g.flows)
 }
 
 // newCapture creates a pcap file and a generator writing into it.

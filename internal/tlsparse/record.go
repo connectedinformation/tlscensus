@@ -165,6 +165,7 @@ func FindServerHello(stream []byte) (*ServerHello, error) {
 	}
 
 	var sh, retry *ServerHello
+	var sawServerHelloDone bool
 	for _, m := range msgs {
 		switch m.Type {
 		case HandshakeServerHello:
@@ -194,6 +195,9 @@ func FindServerHello(stream []byte) (*ServerHello, error) {
 				sh.GroupSource = GroupSourceServerKeyExchange
 			}
 
+		case HandshakeServerHelloDone:
+			sawServerHelloDone = true
+
 		case HandshakeCertificate:
 			if sh == nil || sh.CertificateChain != nil {
 				continue
@@ -205,6 +209,11 @@ func FindServerHello(stream []byte) (*ServerHello, error) {
 	}
 
 	if sh != nil {
+		// Whether the server has finished speaking in the clear. Under
+		// TLS 1.3 the ServerHello is the end of it; under TLS 1.2 the
+		// ServerHelloDone closes the flight. A HelloRetryRequest is never
+		// the end, and FindServerHello never returns one as sh.
+		sh.FlightComplete = sh.NegotiatedVersion() >= 0x0304 || sawServerHelloDone
 		return sh, nil
 	}
 	return retry, nil

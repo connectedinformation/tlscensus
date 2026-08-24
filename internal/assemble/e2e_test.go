@@ -397,3 +397,74 @@ func TestFlowsEmitOnCloseNotOnShutdown(t *testing.T) {
 			"for shutdown, which live capture cannot do", duringRun, want)
 	}
 }
+
+// keepalivePcap holds completed TLS 1.3 handshakes on connections that are
+// never closed — the shape of a browser keep-alive.
+const keepalivePcap = "../../testdata/keepalive.pcap"
+
+// An observation must be reported when the handshake is complete, not when
+// the connection closes.
+//
+// This is the regression test for a bug that only live capture reveals.
+// Reporting on close is invisible offline, because Close flushes everything
+// at end of file and every synthetic connection ends. On a real interface a
+// browser holds connections open for minutes, so a site visited a second ago
+// stayed absent from the report — the capture looked like it was working and
+// was silently minutes behind.
+func TestHandshakeReportedBeforeConnectionCloses(t *testing.T) {
+	var duringRun int
+	closed := false
+
+	asm := assemble.New(func(f *assemble.Flow) {
+		if !closed {
+			duringRun++
+		}
+	}, assemble.Options{})
+
+	src, err := capture.OpenFile(keepalivePcap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	for {
+		data, ci, err := src.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		asm.Packet(data, ci, src.LinkType())
+	}
+
+	closed = true
+	asm.Close()
+
+	if want := 4; duringRun != want {
+		t.Errorf("%d of %d handshakes reported before their connections closed; "+
+			"the rest waited, which on a live interface means minutes of silence",
+			duringRun, want)
+	}
+}
+
+// The early report must be complete, not a placeholder filled in later.
+func TestEarlyReportIsComplete(t *testing.T) {
+	records, _ := readCapture(t, keepalivePcap, assemble.Options{})
+	if len(records) != 4 {
+		t.Fatalf("got %d records, want 4", len(records))
+	}
+	for _, r := range records {
+		if !r.ServerObserved {
+			t.Errorf("%s: ServerObserved = false", r.ServerName)
+		}
+		if r.PQ != inventory.PQNegotiated {
+			t.Errorf("%s: PQ = %q, want %q", r.ServerName, r.PQ, inventory.PQNegotiated)
+		}
+		if r.Group != "X25519MLKEM768" {
+			t.Errorf("%s: Group = %q", r.ServerName, r.Group)
+		}
+		if r.CipherSuite != "TLS_AES_128_GCM_SHA256" {
+			t.Errorf("%s: CipherSuite = %q", r.ServerName, r.CipherSuite)
+		}
+	}
+}
