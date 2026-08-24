@@ -118,6 +118,18 @@ tlscensus interfaces
 tlscensus watch -i "Wi-Fi"
 ```
 
+A value that matches more than one adapter is an error naming the
+candidates, not a silent choice among them. Windows adapter names routinely
+differ only by a suffix — `Ethernet` and `Ethernet 2`, or an adapter and its
+`#2` sibling — and capturing on the wrong one looks exactly like capturing
+on the right one. An exact adapter name always wins over a substring, so the
+name `tlscensus interfaces` prints can be pasted back verbatim even when it
+is a prefix of another.
+
+With no `-i`, capture goes to the first non-loopback adapter that has an
+address. If there is none, tlscensus says so rather than falling back to
+whatever the driver listed first.
+
 ## What promiscuous mode does, and why it is off
 
 By default tlscensus captures only frames the interface would have accepted

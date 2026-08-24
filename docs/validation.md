@@ -21,9 +21,9 @@ without invented fields.
 the accessors and the registry lookups. Clean at 7.1M executions on the
 initial corpus. Not yet running continuously.
 
-### Live capture — verified on macOS and Linux; Windows unverified
+### Live capture — verified on macOS, Linux and Windows
 
-`watch` has been run against a real interface on both platforms and reports
+`watch` has been run against a real interface on all three platforms and reports
 live handshakes correctly: SNI, negotiated version, cipher suite and key
 exchange group.
 
@@ -37,13 +37,19 @@ correctly.
 On Linux (AF_PACKET via `pcapgo.EthernetHandle`), capture was verified and
 four further defects were found and fixed; see below.
 
-**Windows is written but unverified.** It compiles and vets, and
-`live_windows_test.go` asserts the `pcap_pkthdr`, `bpf_program` and `pcap_if`
-layouts on a real Windows machine in CI — which covers the LLP64 trap that is
-this platform's equivalent of the `bh_hdrlen` bug. What no automated check
-covers is whether packets actually arrive, so the smoke test below must be
-run on a machine with Npcap installed before Windows can be called done. On
-the two platforms already verified, that step found three defects apiece.
+On Windows (Npcap 1.88 via runtime `wpcap.dll` loading, Intel Wireless-AC
+9560), capture was verified: 421 packets, four TLS 1.3 flows, all four
+negotiating X25519MLKEM768, with JA4 computed and the summary printed after
+a real Ctrl-C exited 0. The `pcap_pkthdr` layout is confirmed on hardware
+rather than only asserted — capture lengths land within the snaplen and
+timestamps match the wall clock, which is what a mis-sized LLP64 `timeval`
+would have destroyed.
+
+Twelve defects were found first, eleven by code review before the driver was
+ever installed and one by installing it; see below. Npcap also settled two
+assumptions that could not be checked without it: `PCAP_IF_UP` **is** set on
+`pcap_findalldevs` results, and both `pcap_setbuff` and `pcap_setmintocopy`
+resolve, so `BufferBytes` is not inert.
 
 `advertised_only` has still not been observed on real traffic. It is covered
 by the synthetic capture, but no live client has yet been seen advertising a
@@ -51,7 +57,7 @@ post-quantum group without sending a key share for it.
 
 ## The gap CI cannot close
 
-Eight defects have now reached a green CI run and been caught only by
+Nine defects have now reached a green CI run and been caught only by
 running against a real interface. That is the strongest evidence in this
 repository for what the automated suite does and does not cover.
 
@@ -92,6 +98,44 @@ repository for what the automated suite does and does not cover.
 8. Ctrl-C reported the shutdown-induced read error as a capture failure,
    ending every successful run with an error message and a non-zero exit.
 
+### Found on Windows
+
+Windows is the one platform where review preceded the hardware, so the two
+are listed apart — the split is the point.
+
+Eleven came out of a code review of the unverified commit, with no driver
+installed. The one that mattered most was a use-after-free: `Close` ran
+`pcap_close` from the signal goroutine while the capture goroutine sat
+inside `pcap_next_ex`, and a `pcap_t` — unlike the POSIX file descriptor the
+darwin path closes under a read — is freed along with the buffer the read is
+filling. Ctrl-C was an access violation, not a stop. The rest: `errClosed`
+returned where every caller keys on `io.EOF`; a missing DLL reported as
+`permission denied`, sending a user with no Npcap after an elevated prompt;
+first-wins `-i` matching that resolved `Ethernet` to `Ethernet 2`; a default
+that fell back to `devs[0]`; no fallback when the NPF service is stopped; a
+device-name buffer not kept alive across `pcap_open_live`; an unvalidated
+`caplen` feeding `make`; `wpcap.dll` loaded by bare name, so a DLL beside
+the executable would win in an elevated process; a required-but-unused
+`pcap_lib_version`; and `BufferBytes` silently ignored.
+
+9. Installing the driver found the twelfth, which no amount of reading had
+   suggested. `pcap_findalldevs` lists a Bluetooth PAN adapter, two Wi-Fi
+   Direct virtual adapters and an unplugged Ethernet port **ahead** of the
+   Wi-Fi adapter carrying the traffic. Every one of them reports itself up
+   and holds a 169.254 autoconfiguration address and an `fe80::` link-local
+   one, so "first that is up, not loopback, and has an address" — the rule
+   all three platforms shared — selected Bluetooth. The capture ran, exited
+   cleanly, and reported nothing, which is the failure mode that looks most
+   like success. The rule is now "has a *routable* address", in the shared
+   `DefaultInterface` as well as the Windows path.
+
+The eleven are not evidence that review substitutes for hardware. Nine of
+them were reachable by reading because they are contradictions inside the
+source — a flag read from two goroutines, an error value the callers do not
+match on, a documented option never passed to the driver. Number 9 was not:
+nothing in the code says what order a driver enumerates adapters in, or that
+a Bluetooth radio would claim to be up. That had to be run.
+
 ### What the pattern says
 
 Three of these — 2, 5 and 6 — could not have been caught by any test in this
@@ -121,9 +165,9 @@ verifies nothing at all.
 ### Manual smoke test (required before tagging a release)
 
 CI has no network interface and no privileges, so this cannot be automated
-here — and the eight defects above are what that gap costs when the step is
-skipped. Run it on **each** platform that claims live capture; six of the
-eight were platform-specific, and the two that were not still presented
+here — and the nine defects above are what that gap costs when the step is
+skipped. Run it on **each** platform that claims live capture; seven of the
+nine were platform-specific, and the two that were not still presented
 differently on each.
 
 ```sh
@@ -131,6 +175,24 @@ sudo ./tlscensus watch -i <iface>
 # in another shell: curl https://cloudflare.com/ >/dev/null
 # then Ctrl-C
 ```
+
+On Windows, Npcap grants access without elevation unless it was installed
+with "Restrict Npcap driver's access to Administrators only", so an ordinary
+PowerShell prompt is usually enough:
+
+```powershell
+.	lscensus.exe interfaces
+.	lscensus.exe watch -i "<adapter description>"
+# in another shell: curl.exe https://cloudflare.com/ -o NUL
+# then Ctrl-C
+```
+
+`go test ./internal/capture/` additionally runs the live-handle tests there
+whenever Npcap is present: they open a real `pcap_t`, close it forty times
+from another goroutine while a read is in flight, and check that captured
+lengths and timestamps are sane. Those cover defects 9 and the use-after-free
+without a human watching the output — but only on a machine with the driver,
+which is the whole point of this section.
 
 Check that:
 
@@ -142,7 +204,12 @@ Check that:
   exercises reassembly of a ClientHello larger than one segment.
 - Ctrl-C exits cleanly, with a summary and status 0 (defect 8).
 - running **without** privileges prints the platform's permission hint
-  rather than a bare errno (defect 7).
+  rather than a bare errno (defect 7). On Windows, running with **no driver
+  installed** must name the missing DLL and how to get it, and must not say
+  "permission denied".
+- the interface chosen with no `-i` is the one carrying traffic. On Windows
+  it will not be first in the list, and several adapters ahead of it will
+  claim to be up (defect 9).
 
 If nothing appears at all, re-run with `-no-filter` to separate a
 kernel-filter fault from a read-path fault. Run under `-race` if anything

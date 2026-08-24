@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"runtime"
 	"time"
 )
@@ -85,6 +86,30 @@ func (e *PermissionError) Error() string {
 
 func (e *PermissionError) Unwrap() error { return e.Err }
 
+// SetupError reports that capture cannot start because a prerequisite is
+// missing, as distinct from privilege being refused.
+//
+// It exists so that the two are not conflated. PermissionError prints
+// "permission denied" unconditionally, which is right for its case and
+// actively misleading for this one: a Windows machine with no Npcap
+// installed would otherwise be told it lacked administrator rights, and
+// sent looking for an elevated prompt that cannot help.
+type SetupError struct {
+	Op   string
+	Err  error
+	Hint string
+}
+
+func (e *SetupError) Error() string {
+	s := fmt.Sprintf("%s: %v", e.Op, e.Err)
+	if e.Hint != "" {
+		s += "\n\n" + e.Hint
+	}
+	return s
+}
+
+func (e *SetupError) Unwrap() error { return e.Err }
+
 // InterfaceInfo describes a capturable network interface.
 type InterfaceInfo struct {
 	Name      string
@@ -128,18 +153,58 @@ func stdlibInterfaces() ([]InterfaceInfo, error) {
 }
 
 // DefaultInterface picks the interface to capture on when none was named:
-// the first one that is up, is not loopback, and has an address.
+// the first one that is up, is not loopback, and has a routable address.
 func DefaultInterface() (string, error) {
 	ifs, err := Interfaces()
 	if err != nil {
 		return "", err
 	}
-	for _, i := range ifs {
-		if i.Up && !i.Loopback && len(i.Addresses) > 0 {
+	// Preferring an interface that is up, then settling for one that is
+	// not, so a machine whose driver never reports the flag still gets a
+	// sensible answer rather than none.
+	for _, requireUp := range []bool{true, false} {
+		for _, i := range ifs {
+			if i.Loopback || !hasRoutableAddress(i.Addresses) {
+				continue
+			}
+			if requireUp && !i.Up {
+				continue
+			}
 			return i.Name, nil
 		}
 	}
 	return "", errors.New("no suitable interface found; name one with -i")
+}
+
+// hasRoutableAddress reports whether any address is one a host actually
+// communicates through.
+//
+// "Has an address" is not the same question, and answering it instead picks
+// the wrong adapter on a normal Windows machine: a Bluetooth PAN adapter, a
+// Wi-Fi Direct virtual adapter and an Ethernet port with no cable all carry
+// a 169.254 autoconfiguration address and an fe80:: link-local one, all
+// report themselves up, and all sort ahead of the Wi-Fi adapter that has
+// the actual route. Capturing there runs forever and reports nothing.
+//
+// Addresses arrive either bare (from Npcap) or in CIDR form (from the
+// standard library listing), so both are accepted.
+func hasRoutableAddress(addrs []string) bool {
+	for _, a := range addrs {
+		addr, err := netip.ParseAddr(a)
+		if err != nil {
+			prefix, perr := netip.ParsePrefix(a)
+			if perr != nil {
+				continue
+			}
+			addr = prefix.Addr()
+		}
+		if addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() ||
+			addr.IsUnspecified() || addr.IsLoopback() {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // LiveSupported reports whether this build can capture live traffic.

@@ -16,9 +16,18 @@ import (
 // description as the display name and the addresses parsed out so an
 // interface can be picked by its IP.
 //
-// If Npcap is not installed there is nothing to capture on, but `tlscensus
+// If Npcap cannot be used there is nothing to capture on, but `tlscensus
 // interfaces` should still say something useful rather than error, so it
 // falls back to the standard library listing.
+//
+// That covers two distinct failures, not one. The driver may be absent, and
+// it may be installed with its NPF service stopped — a common state, since
+// some install options leave the service set to start on demand — in which
+// case the DLL loads and pcap_findalldevs is what fails. Listing interfaces
+// is the first thing a user runs, so both fall back rather than error. The
+// names printed then are the operating system's rather than capture device
+// names; `watch` is where the missing driver gets reported properly, with
+// the hint attached.
 func platformInterfaces() ([]InterfaceInfo, error) {
 	w, err := loadWpcap()
 	if err != nil {
@@ -26,7 +35,7 @@ func platformInterfaces() ([]InterfaceInfo, error) {
 	}
 	devs, err := listDevices(w)
 	if err != nil {
-		return nil, err
+		return stdlibInterfaces()
 	}
 	out := make([]InterfaceInfo, 0, len(devs))
 	for _, d := range devs {

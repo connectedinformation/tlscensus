@@ -62,8 +62,9 @@ per-process pseudo-device would give process attribution nearly free, but its
 link type is not decoded, so `watch` rejects it with an explicit message
 rather than silently capturing nothing. That is M6.
 
-**M4 — Windows.** Written, compiling and vetting clean, and **not yet run on
-a Windows machine**. It is not done until it has been.
+**M4 — Windows.** Done. Verified on Windows 11 with Npcap 1.88: live
+capture on an Intel Wireless-AC 9560, four TLS 1.3 flows read correctly, and
+Ctrl-C exiting 0 with a summary.
 
 Npcap is driven through runtime DLL loading rather than cgo, so the binary
 stays cgo-free like the other two platforms: one runner still produces every
@@ -81,9 +82,15 @@ is no parser to unit-test here, `live_windows_test.go` asserts the sizes and
 field offsets directly and CI runs it on a real Windows machine, which is the
 closest an automated check can get.
 
-The remaining gap is the same one M2 had: nothing has confirmed that packets
-actually arrive. That needs the smoke test in
-[validation.md](validation.md) on a machine with Npcap installed.
+That closed the gap M2 had, and running it closed one more. Twelve defects
+were found: eleven by reviewing the unverified commit — a use-after-free on
+every Ctrl-C among them, since `pcap_close` frees the buffer an in-flight
+`pcap_next_ex` is filling — and a twelfth only by installing the driver.
+Npcap enumerates a Bluetooth PAN adapter and two Wi-Fi Direct virtual
+adapters ahead of the real one, all reporting themselves up and holding
+169.254 addresses, so the default-interface rule every platform shared
+picked the Bluetooth radio and captured nothing. See
+[validation.md](validation.md).
 
 The driver-free alternatives, `pktmon` (built in since Windows 10 1809) and
 WFP, remain optimisations rather than blockers — worth revisiting only if
