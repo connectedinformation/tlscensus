@@ -12,8 +12,8 @@ import (
 // thing that is wrong in a way no compiler catches and no ordinary test
 // exercises. x/net/bpf ships a VM, so the real kernel program can be run
 // against real packet bytes here, with no privileges and no interface.
-func TestTCPFilter(t *testing.T) {
-	raw, err := TCPFilter(layers.LinkTypeEthernet, 65535)
+func TestCaptureFilter(t *testing.T) {
+	raw, err := CaptureFilter(layers.LinkTypeEthernet, 65535)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,9 @@ func TestTCPFilter(t *testing.T) {
 		accept bool
 	}{
 		{"ipv4 tcp", ethFrame(0x0800, ipv4(6)), true},
-		{"ipv4 udp", ethFrame(0x0800, ipv4(17)), false},
+		// UDP is accepted for QUIC; the cheap first-byte check that
+		// separates QUIC from DNS and everything else runs in userspace.
+		{"ipv4 udp", ethFrame(0x0800, ipv4(17)), true},
 		{"ipv4 icmp", ethFrame(0x0800, ipv4(1)), false},
 		// Accepted wholesale so extension-header chains are never dropped.
 		{"ipv6 tcp", ethFrame(0x86dd, ipv6(6)), true},
@@ -58,8 +60,8 @@ func TestTCPFilter(t *testing.T) {
 
 // Every real TCP packet in the sample capture must survive the filter. If
 // the offsets are wrong this is what notices.
-func TestTCPFilterPassesSampleCapture(t *testing.T) {
-	raw, err := TCPFilter(layers.LinkTypeEthernet, 65535)
+func TestCaptureFilterPassesSampleCapture(t *testing.T) {
+	raw, err := CaptureFilter(layers.LinkTypeEthernet, 65535)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,11 +104,11 @@ func TestTCPFilterPassesSampleCapture(t *testing.T) {
 	}
 }
 
-func TestTCPFilterUnknownLinkTypeIsUnfiltered(t *testing.T) {
+func TestCaptureFilterUnknownLinkTypeIsUnfiltered(t *testing.T) {
 	// A nil program means "no kernel filter", which is slower but never
 	// drops anything. Returning an error here would break capture on
 	// loopback and pktap.
-	raw, err := TCPFilter(layers.LinkTypeNull, 65535)
+	raw, err := CaptureFilter(layers.LinkTypeNull, 65535)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

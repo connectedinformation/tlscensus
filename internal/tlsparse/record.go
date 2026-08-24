@@ -131,13 +131,35 @@ func splitMessages(buf []byte) []HandshakeMessage {
 	return msgs
 }
 
-// FindClientHello returns the first ClientHello in a client-to-server byte
-// stream, or nil if there is none.
+// HandshakeMessagesRaw splits a bare handshake stream — one with no record
+// layer around it.
+//
+// QUIC does not use the TLS record layer at all: CRYPTO frames carry
+// handshake messages directly (RFC 9001 section 4). Feeding those bytes to
+// HandshakeMessages looks for a record header that is not there and rejects
+// the whole flow as non-TLS, which is a silent and total loss rather than a
+// visible error.
+func HandshakeMessagesRaw(b []byte) []HandshakeMessage {
+	return splitMessages(b)
+}
+
+// FindClientHello returns the first ClientHello in a record-framed
+// client-to-server byte stream, or nil if there is none.
 func FindClientHello(stream []byte) (*ClientHello, error) {
 	msgs, err := HandshakeMessages(stream)
 	if err != nil {
 		return nil, err
 	}
+	return findClientHelloIn(msgs)
+}
+
+// FindClientHelloRaw is FindClientHello for a stream with no record layer,
+// as QUIC CRYPTO frames carry.
+func FindClientHelloRaw(stream []byte) (*ClientHello, error) {
+	return findClientHelloIn(HandshakeMessagesRaw(stream))
+}
+
+func findClientHelloIn(msgs []HandshakeMessage) (*ClientHello, error) {
 	for _, m := range msgs {
 		if m.Type == HandshakeClientHello {
 			return ParseClientHello(m.Body)
@@ -163,7 +185,16 @@ func FindServerHello(stream []byte) (*ServerHello, error) {
 	if err != nil {
 		return nil, err
 	}
+	return findServerHelloIn(msgs)
+}
 
+// FindServerHelloRaw is FindServerHello for a stream with no record layer,
+// as QUIC CRYPTO frames carry.
+func FindServerHelloRaw(stream []byte) (*ServerHello, error) {
+	return findServerHelloIn(HandshakeMessagesRaw(stream))
+}
+
+func findServerHelloIn(msgs []HandshakeMessage) (*ServerHello, error) {
 	var sh, retry *ServerHello
 	var sawServerHelloDone bool
 	for _, m := range msgs {

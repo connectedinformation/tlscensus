@@ -185,7 +185,7 @@ func (s *darwinSource) configure(iface string, opts LiveOptions) error {
 }
 
 func (s *darwinSource) setFilter(snaplen int) error {
-	raw, err := TCPFilter(s.linkType, snaplen)
+	raw, err := CaptureFilter(s.linkType, snaplen)
 	if err != nil {
 		return err
 	}

@@ -172,7 +172,12 @@ func readTsharkFields(path string) (map[uint16]*hello, error) {
 	out := map[uint16]*hello{}
 	for _, p := range packets {
 		l := p.Source.Layers
+		// QUIC handshakes arrive over UDP, so the join key comes from
+		// whichever transport carried them.
 		ports := strs(l["tcp.srcport"])
+		if len(ports) == 0 {
+			ports = strs(l["udp.srcport"])
+		}
 		if len(ports) == 0 {
 			continue
 		}
@@ -234,6 +239,9 @@ func addScopedSigAlgs(path string, hellos map[uint16]*hello) error {
 			continue
 		}
 		ports := collect(layers, "tcp.srcport")
+		if len(ports) == 0 {
+			ports = collect(layers, "udp.srcport")
+		}
 		if len(ports) == 0 {
 			continue
 		}

@@ -337,7 +337,7 @@ func OpenLive(iface string, opts LiveOptions) (Source, error) {
 }
 
 func (s *windowsSource) setFilter(snaplen int) error {
-	raw, err := TCPFilter(s.linkType, snaplen)
+	raw, err := CaptureFilter(s.linkType, snaplen)
 	if err != nil {
 		return err
 	}

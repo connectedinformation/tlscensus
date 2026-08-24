@@ -81,6 +81,7 @@ func WriteText(w io.Writer, r *Report) error {
 	section(w, "PROTOCOL VERSION", s.Versions, s.Flows)
 	section(w, "CIPHER SUITE (negotiated)", s.Ciphers, s.ServerObserved)
 	section(w, "KEY EXCHANGE GROUP (negotiated)", s.Groups, s.ServerObserved)
+	section(w, "TRANSPORT", s.Transports, s.Flows)
 	section(w, "ALPN", s.ALPN, s.Flows)
 	section(w, "SERVER NAME", s.ServerName, s.Flows)
 	section(w, "CLIENT FINGERPRINT (JA4)", s.JA4, s.Flows)

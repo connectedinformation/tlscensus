@@ -7,8 +7,13 @@ import (
 	"golang.org/x/net/bpf"
 )
 
-// TCPFilter returns a kernel BPF program that keeps TCP traffic and drops
-// everything else, for the given link type.
+// CaptureFilter returns a kernel BPF program that keeps the traffic a TLS
+// inventory can learn from — TCP and UDP — and drops everything else.
+//
+// UDP is here for QUIC. Restricting it to port 443 would be the same mistake
+// as restricting TCP to 443, and the userspace check that follows is cheap:
+// a QUIC Initial has the top two bits of its first byte set, so almost all
+// other UDP traffic is rejected on one byte.
 //
 // The filter runs in the kernel, so what it rejects costs nothing. What it
 // accepts is deliberately wider than strictly necessary:
@@ -26,7 +31,7 @@ import (
 //
 // An unsupported link type returns a nil program, meaning no kernel filter.
 // That is correct but slower, never wrong.
-func TCPFilter(lt layers.LinkType, snaplen int) ([]bpf.RawInstruction, error) {
+func CaptureFilter(lt layers.LinkType, snaplen int) ([]bpf.RawInstruction, error) {
 	var insns []bpf.Instruction
 
 	switch lt {
@@ -34,17 +39,19 @@ func TCPFilter(lt layers.LinkType, snaplen int) ([]bpf.RawInstruction, error) {
 		insns = []bpf.Instruction{
 			// 0: ethertype
 			bpf.LoadAbsolute{Off: 12, Size: 2},
-			// 1: IPv6 -> accept (6)
-			bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x86dd, SkipTrue: 4, SkipFalse: 0},
-			// 2: IPv4 -> 3, else drop (5)
-			bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x0800, SkipTrue: 0, SkipFalse: 2},
+			// 1: IPv6 -> accept (7)
+			bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x86dd, SkipTrue: 5, SkipFalse: 0},
+			// 2: IPv4 -> 3, else drop (6)
+			bpf.JumpIf{Cond: bpf.JumpEqual, Val: 0x0800, SkipTrue: 0, SkipFalse: 3},
 			// 3: IPv4 protocol byte
 			bpf.LoadAbsolute{Off: 23, Size: 1},
-			// 4: TCP -> accept (6), else drop (5)
-			bpf.JumpIf{Cond: bpf.JumpEqual, Val: 6, SkipTrue: 1, SkipFalse: 0},
-			// 5: drop
+			// 4: TCP -> accept (7), else 5
+			bpf.JumpIf{Cond: bpf.JumpEqual, Val: 6, SkipTrue: 2, SkipFalse: 0},
+			// 5: UDP -> accept (7), else drop (6)
+			bpf.JumpIf{Cond: bpf.JumpEqual, Val: 17, SkipTrue: 1, SkipFalse: 0},
+			// 6: drop
 			bpf.RetConstant{Val: 0},
-			// 6: accept
+			// 7: accept
 			bpf.RetConstant{Val: uint32(snaplen)},
 		}
 	default:

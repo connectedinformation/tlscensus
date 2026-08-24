@@ -83,6 +83,12 @@ type Record struct {
 	FirstSeen time.Time `json:"first_seen"`
 	LastSeen  time.Time `json:"last_seen"`
 
+	// Transport is "tcp" or "quic". Worth reporting because it changes
+	// what could have been seen: over QUIC the certificate is encrypted at
+	// the Handshake level, so an empty certificate list means "not
+	// visible", not "none presented".
+	Transport string `json:"transport"`
+
 	ClientIP   netip.Addr `json:"client_ip"`
 	ClientPort uint16     `json:"client_port"`
 	ServerIP   netip.Addr `json:"server_ip"`
@@ -138,6 +144,7 @@ func (r *Record) MaxSeverity() Severity {
 func Analyze(f *assemble.Flow) *Record {
 	ch := f.Client
 	r := &Record{
+		Transport:      f.Transport,
 		FirstSeen:      f.FirstSeen,
 		LastSeen:       f.LastSeen,
 		ClientIP:       f.ClientIP,

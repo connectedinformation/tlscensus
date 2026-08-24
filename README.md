@@ -108,6 +108,14 @@ flows are counted separately and kept out of hostname distributions.
 **TLS 1.2 groups are read from ServerKeyExchange**, the only place a 1.2
 handshake names its key exchange group.
 
+**QUIC is decoded, not skipped.** Initial packets are protected with keys
+derived from the connection ID in the clear, so HTTP/3 handshakes are read
+the same as TCP ones. This matters more than it sounds: the providers who
+deployed hybrid post-quantum key exchange early are the same ones who
+deployed HTTP/3 early, so a TCP-only inventory reports a more classical
+world than the one on the wire — and a site you just loaded can be missing
+from it entirely.
+
 ## What it cannot see
 
 Stated plainly, because an inventory that overstates its coverage is worse
@@ -116,16 +124,9 @@ than no inventory.
 - **TLS 1.3 encrypts the certificate.** Certificate inventory — key sizes,
   issuers, expiry — is only available for TLS 1.2 and below. This is the
   protocol, not a gap in the parser.
-- **QUIC / HTTP-3 is not decoded yet** (M5). A meaningful share of modern
-  TLS 1.3 traffic rides on QUIC, and it skews post-quantum. Until M5 lands,
-  the readiness figure is biased *downward* on any network carrying HTTP/3.
-
-  This is not a subtle effect. Google, Cloudflare and many others advertise
-  `alt-svc: h3`, so a browser switches to QUIC after its first visit and
-  every later connection to that host becomes invisible — a site you just
-  loaded can be entirely absent from the report. Check with
-  `curl -sI https://host/ | grep alt-svc`: if it offers `h3`, expect to see
-  less of it than you should.
+- **QUIC connection migration, Retry and 0-RTT** are not followed. A Retry
+  re-keys the connection on a new connection ID; it is detected, and the
+  flow is then abandoned rather than guessed at.
 - **No process attribution yet** (M6). Flows are identified by address and
   port, not by the application that opened them. On macOS the `pktap`
   pseudo-device would provide this nearly free; its link type is not decoded

@@ -51,6 +51,7 @@ for pcap in "$@"; do
     # delegated_credentials alike, and only the nesting distinguishes them.
     if ! "$TSHARK" -r "$pcap" -Y 'tls.handshake.type == 1' -T json \
         -e tcp.srcport \
+        -e udp.srcport \
         -e tls.handshake.extensions_server_name \
         -e tls.handshake.ciphersuite \
         -e tls.handshake.extensions_supported_group \

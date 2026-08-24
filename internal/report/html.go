@@ -205,6 +205,7 @@ func buildView(r *Report, records []*inventory.Record) *htmlView {
 		distSection("Protocol version", "", s.Versions, s.Flows),
 		distSection("Cipher suite", "negotiated", s.Ciphers, s.ServerObserved),
 		distSection("Key exchange group", "negotiated", s.Groups, s.ServerObserved),
+		distSection("Transport", "", s.Transports, s.Flows),
 		distSection("ALPN", "", s.ALPN, s.Flows),
 		distSection("Server name", "ECH flows excluded — their names are not destinations",
 			s.ServerName, s.Flows),

@@ -30,6 +30,7 @@ type Summary struct {
 	Ciphers    []Count `json:"ciphers"`
 	Groups     []Count `json:"groups"`
 	ALPN       []Count `json:"alpn"`
+	Transports []Count `json:"transports"`
 	JA4        []Count `json:"ja4"`
 	ServerName []Count `json:"server_names"`
 
@@ -55,6 +56,7 @@ type Accumulator struct {
 	ciphers   map[string]int
 	groups    map[string]int
 	alpn      map[string]int
+	transport map[string]int
 	ja4       map[string]int
 	names     map[string]int
 	pq        map[PQStatus]int
@@ -66,14 +68,15 @@ type Accumulator struct {
 // NewAccumulator returns an empty Accumulator.
 func NewAccumulator() *Accumulator {
 	return &Accumulator{
-		versions: map[string]int{},
-		ciphers:  map[string]int{},
-		groups:   map[string]int{},
-		alpn:     map[string]int{},
-		ja4:      map[string]int{},
-		names:    map[string]int{},
-		pq:       map[PQStatus]int{},
-		findings: map[string]*FindingCount{},
+		versions:  map[string]int{},
+		ciphers:   map[string]int{},
+		groups:    map[string]int{},
+		alpn:      map[string]int{},
+		transport: map[string]int{},
+		ja4:       map[string]int{},
+		names:     map[string]int{},
+		pq:        map[PQStatus]int{},
+		findings:  map[string]*FindingCount{},
 	}
 }
 
@@ -105,6 +108,9 @@ func (a *Accumulator) Add(r *Record) {
 
 	if r.ALPN != "" {
 		a.alpn[r.ALPN]++
+	}
+	if r.Transport != "" {
+		a.transport[r.Transport]++
 	}
 	if r.JA4 != "" {
 		a.ja4[r.JA4]++
@@ -140,6 +146,7 @@ func (a *Accumulator) Summary(topN int) Summary {
 	s.Ciphers = rank(a.ciphers, topN)
 	s.Groups = rank(a.groups, topN)
 	s.ALPN = rank(a.alpn, topN)
+	s.Transports = rank(a.transport, 0)
 	s.JA4 = rank(a.ja4, topN)
 	s.ServerName = rank(a.names, topN)
 

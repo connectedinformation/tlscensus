@@ -80,10 +80,21 @@ const (
 	minBufferedPagesPerConn = 8
 )
 
-// Flow is one observed TCP connection and whatever of its TLS handshake was
+// Transport names the protocol carrying the handshake.
+const (
+	TransportTCP  = "tcp"
+	TransportQUIC = "quic"
+)
+
+// Flow is one observed connection and whatever of its TLS handshake was
 // visible. Server is nil when the response was never captured; Client is
 // never nil in an emitted flow.
 type Flow struct {
+	// Transport is "tcp" or "quic". The handshake is the same either way —
+	// QUIC carries TLS 1.3 — but what is visible differs: over QUIC the
+	// certificate is at the Handshake level and never readable.
+	Transport string
+
 	ClientIP   netip.Addr
 	ServerIP   netip.Addr
 	ClientPort uint16
@@ -128,6 +139,7 @@ func (o *Options) setDefaults() {
 type Stats struct {
 	Packets     int64
 	TCPPackets  int64
+	UDPPackets  int64
 	Streams     int64
 	TLSFlows    int64
 	RejectedTCP int64
@@ -147,6 +159,10 @@ type Assembler struct {
 	handler Handler
 	stats   Stats
 
+	// quicFlows is keyed by the UDP four-tuple. QUIC has no cleartext
+	// connection close, so these are only ever released by the idle sweep.
+	quicFlows map[quicKey]*quicFlow
+
 	lastTS    time.Time
 	lastFlush time.Time
 }
@@ -155,7 +171,7 @@ type Assembler struct {
 // ClientHello.
 func New(h Handler, opts Options) *Assembler {
 	opts.setDefaults()
-	a := &Assembler{handler: h, opts: opts}
+	a := &Assembler{handler: h, opts: opts, quicFlows: map[quicKey]*quicFlow{}}
 	a.asm = reassembly.NewAssembler(reassembly.NewStreamPool(&factory{a: a}))
 
 	// The per-connection cap applies per direction, and payload past the
@@ -185,20 +201,31 @@ func (a *Assembler) Packet(data []byte, ci gopacket.CaptureInfo, linkType layers
 	// payload bytes, while a Source may reuse its buffer between calls.
 	pkt := gopacket.NewPacket(data, linkType, gopacket.DecodeOptions{Lazy: true})
 
-	tcpLayer := pkt.Layer(layers.LayerTypeTCP)
-	if tcpLayer == nil {
-		return
-	}
 	netLayer := pkt.NetworkLayer()
 	if netLayer == nil {
+		return
+	}
+
+	if udpLayer := pkt.Layer(layers.LayerTypeUDP); udpLayer != nil {
+		udp := udpLayer.(*layers.UDP)
+		if len(udp.Payload) == 0 {
+			return
+		}
+		a.stats.UDPPackets++
+		src, dst, sport, dport, payload := udpPayload(netLayer, udp)
+		a.quicPacket(src, dst, sport, dport, payload, ci.Timestamp)
+		a.trackTime(ci.Timestamp)
+		return
+	}
+
+	tcpLayer := pkt.Layer(layers.LayerTypeTCP)
+	if tcpLayer == nil {
 		return
 	}
 	a.stats.TCPPackets++
 
 	ts := ci.Timestamp
-	if ts.After(a.lastTS) {
-		a.lastTS = ts
-	}
+	a.trackTime(ts)
 	a.asm.AssembleWithContext(netLayer.NetworkFlow(), tcpLayer.(*layers.TCP), &context{ci: ci})
 
 	// Flush on capture time, not wall time, so replaying a file behaves the
@@ -208,6 +235,16 @@ func (a *Assembler) Packet(data []byte, ci gopacket.CaptureInfo, linkType layers
 	}
 	if ts.Sub(a.lastFlush) >= a.opts.CloseTimeout {
 		a.asm.FlushCloseOlderThan(ts.Add(-a.opts.CloseTimeout))
+		a.flushQUIC(ts.Add(-a.opts.CloseTimeout))
+		a.lastFlush = ts
+	}
+}
+
+func (a *Assembler) trackTime(ts time.Time) {
+	if ts.After(a.lastTS) {
+		a.lastTS = ts
+	}
+	if a.lastFlush.IsZero() {
 		a.lastFlush = ts
 	}
 }
@@ -220,11 +257,13 @@ func (a *Assembler) Packet(data []byte, ci gopacket.CaptureInfo, linkType layers
 // the next packet from anyone, which on an idle host can be minutes.
 func (a *Assembler) FlushOlderThan(t time.Time) {
 	a.asm.FlushCloseOlderThan(t)
+	a.flushQUIC(t)
 }
 
 // Close flushes every remaining stream, emitting partial handshakes.
 func (a *Assembler) Close() {
 	a.asm.FlushAll()
+	a.flushQUIC(time.Now().Add(time.Hour))
 }
 
 // Stats returns a snapshot of the counters.
@@ -273,6 +312,7 @@ func (f *factory) New(netFlow, tcpFlow gopacket.Flow, tcp *layers.TCP, ac reasse
 		rejected: over,
 		counted:  !over,
 		flow: &Flow{
+			Transport:  TransportTCP,
 			ClientIP:   addrOf(src),
 			ServerIP:   addrOf(dst),
 			ClientPort: portOf(sport),

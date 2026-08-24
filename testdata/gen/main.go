@@ -61,6 +61,71 @@ func main() {
 	writeSample()
 	writeConcurrent()
 	writeKeepalive()
+	writeQUIC()
+}
+
+// writeQUIC produces HTTP/3 handshakes: a client Initial carrying a
+// ClientHello, and a server Initial carrying the ServerHello.
+//
+// The ClientHello is deliberately large enough to need two Initial packets,
+// because a post-quantum key share does not fit in one — the same property
+// that makes a TCP post-quantum ClientHello span segments. Reassembly over
+// QUIC is by CRYPTO frame offset rather than TCP sequence number, but the
+// failure it guards against is identical: dropping exactly the handshakes a
+// post-quantum inventory exists to count.
+func writeQUIC() {
+	out := "testdata/quic.pcap"
+	g, closeFile := newCapture(out)
+	defer closeFile()
+
+	hosts := []struct {
+		name  string
+		group uint16
+	}{
+		{"www.google.com", x25519MLKEM768},
+		{"cloudflare-quic.com", x25519MLKEM768},
+		{"classic-h3.example", x25519},
+	}
+
+	for i, h := range hosts {
+		dcid := []byte{0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, byte(i)}
+		scid := []byte{0xf0, 0x67, 0xa5, 0x50, 0x2a, 0x42, 0x62, byte(i)}
+
+		ch := tlssynth.ClientHello(tlssynth.ClientHelloSpec{
+			Ciphers:           []uint16{tlsAES128GCMSHA256, tlsAES256GCMSHA384, tlsChaCha20Poly1305},
+			SNI:               h.name,
+			ALPN:              []string{"h3"},
+			SupportedVersions: []uint16{tls13},
+			Groups:            []uint16{x25519MLKEM768, x25519, secp256r1},
+			KeyShares:         []uint16{h.group},
+			SigAlgs:           []uint16{0x0403, 0x0804, 0x0401},
+			QUIC:              true,
+		})
+		chMsg := tlssynth.HandshakeMsg(tlssynth.MsgClientHello, ch)
+		sh := tlssynth.HandshakeMsg(tlssynth.MsgServerHello, tlssynth.ServerHello(tlssynth.ServerHelloSpec{
+			Cipher: tlsAES128GCMSHA256, SelectedVersion: tls13, Group: h.group, ALPN: "h3",
+		}))
+
+		cIP := net.ParseIP("192.168.1.80")
+		sIP := net.ParseIP(fmt.Sprintf("142.250.185.%d", 100+i))
+		sport := uint16(54000 + i)
+		g.flows++
+
+		// Split the ClientHello across two Initial packets, as a real
+		// post-quantum ClientHello must be.
+		half := len(chMsg) / 2
+		g.emitUDP(cIP, sIP, sport, 443,
+			tlssynth.QUICInitial(dcid, scid, false, 0, tlssynth.CryptoFrame(0, chMsg[:half]), 1200))
+		g.emitUDP(cIP, sIP, sport, 443,
+			tlssynth.QUICInitial(dcid, scid, false, 1, tlssynth.CryptoFrame(uint64(half), chMsg[half:]), 1200))
+
+		// The server's Initial is protected with keys derived from the
+		// client's original connection ID, not from its own.
+		g.emitUDP(sIP, cIP, 443, sport,
+			tlssynth.QUICInitial(dcid, scid, true, 0, tlssynth.CryptoFrame(0, sh), 0))
+	}
+
+	fmt.Printf("wrote %s (%d packets, %d QUIC flows)\n", out, g.packets, g.flows)
 }
 
 // writeKeepalive produces completed TLS 1.3 handshakes on connections that
@@ -441,6 +506,47 @@ func (g *gen) rawFlow(client, server string, sport, dport uint16, c2s, s2c []byt
 }
 
 type tcpFlags struct{ syn, ack, psh, fin bool }
+
+// emitUDP writes one UDP datagram carrying a QUIC packet.
+func (g *gen) emitUDP(src, dst net.IP, sport, dport uint16, payload []byte) {
+	eth := &layers.Ethernet{
+		SrcMAC:       net.HardwareAddr{0x02, 0, 0, 0, 0, 1},
+		DstMAC:       net.HardwareAddr{0x02, 0, 0, 0, 0, 2},
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	udp := &layers.UDP{SrcPort: layers.UDPPort(sport), DstPort: layers.UDPPort(dport)}
+
+	var netLayer gopacket.SerializableLayer
+	if v4 := src.To4(); v4 != nil {
+		ip := &layers.IPv4{
+			Version: 4, IHL: 5, TTL: 64,
+			Protocol: layers.IPProtocolUDP, SrcIP: v4, DstIP: dst.To4(),
+		}
+		udp.SetNetworkLayerForChecksum(ip)
+		netLayer = ip
+	} else {
+		eth.EthernetType = layers.EthernetTypeIPv6
+		ip := &layers.IPv6{
+			Version: 6, HopLimit: 64,
+			NextHeader: layers.IPProtocolUDP, SrcIP: src, DstIP: dst,
+		}
+		udp.SetNetworkLayerForChecksum(ip)
+		netLayer = ip
+	}
+
+	buf := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
+	if err := gopacket.SerializeLayers(buf, opts, eth, netLayer, udp, gopacket.Payload(payload)); err != nil {
+		log.Fatalf("serialize udp: %v", err)
+	}
+	b := buf.Bytes()
+	g.now = g.now.Add(250 * time.Microsecond)
+	ci := gopacket.CaptureInfo{Timestamp: g.now, CaptureLength: len(b), Length: len(b)}
+	if err := g.w.WritePacket(ci, b); err != nil {
+		log.Fatalf("write udp: %v", err)
+	}
+	g.packets++
+}
 
 func (g *gen) emit(src, dst net.IP, sport, dport uint16, seq, ack uint32, fl tcpFlags, payload []byte) {
 	eth := &layers.Ethernet{

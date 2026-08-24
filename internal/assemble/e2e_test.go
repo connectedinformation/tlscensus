@@ -468,3 +468,89 @@ func TestEarlyReportIsComplete(t *testing.T) {
 		}
 	}
 }
+
+const quicPcap = "../../testdata/quic.pcap"
+
+// QUIC carries the same TLS handshake, so it must produce the same
+// observations. Leaving it out is not a neutral gap: the providers who
+// deployed hybrid post-quantum key exchange early are the same ones who
+// deployed HTTP/3 early, so a TCP-only inventory under-reports precisely
+// what it exists to measure.
+func TestQUICHandshakesAreReported(t *testing.T) {
+	records, stats := readCapture(t, quicPcap, assemble.Options{})
+
+	if len(records) != 3 {
+		t.Fatalf("got %d QUIC flows, want 3", len(records))
+	}
+	if stats.UDPPackets == 0 {
+		t.Error("UDPPackets = 0")
+	}
+	if stats.TCPPackets != 0 {
+		t.Errorf("TCPPackets = %d in a QUIC-only capture", stats.TCPPackets)
+	}
+
+	for _, r := range records {
+		if r.Transport != "quic" {
+			t.Errorf("%s: Transport = %q, want quic", r.ServerName, r.Transport)
+		}
+		if !r.ServerObserved {
+			t.Errorf("%s: no ServerHello recovered", r.ServerName)
+		}
+		if r.Version != "TLS 1.3" {
+			t.Errorf("%s: Version = %q — QUIC is TLS 1.3 only", r.ServerName, r.Version)
+		}
+		if r.ALPN != "h3" {
+			t.Errorf("%s: ALPN = %q, want h3", r.ServerName, r.ALPN)
+		}
+		// The certificate is at the QUIC Handshake level, under keys a
+		// passive observer never sees. Empty here means "not visible".
+		if len(r.Certificates) != 0 {
+			t.Errorf("%s: %d certificates reported; none are visible over QUIC",
+				r.ServerName, len(r.Certificates))
+		}
+		// JA4's protocol character distinguishes QUIC from TCP.
+		if len(r.JA4) == 0 || r.JA4[0] != 'q' {
+			t.Errorf("%s: JA4 = %q, want it to start with q", r.ServerName, r.JA4)
+		}
+	}
+}
+
+// The ClientHello is split across two Initial packets, as a post-quantum one
+// must be. CRYPTO frames carry offsets rather than sequence numbers, but the
+// failure guarded against is the same: dropping exactly the handshakes worth
+// counting.
+func TestQUICClientHelloReassembledAcrossPackets(t *testing.T) {
+	records, _ := readCapture(t, quicPcap, assemble.Options{})
+
+	want := map[string]inventory.PQStatus{
+		"www.google.com":      inventory.PQNegotiated,
+		"cloudflare-quic.com": inventory.PQNegotiated,
+		"classic-h3.example":  inventory.PQAdvertised,
+	}
+	for _, r := range records {
+		w, ok := want[r.ServerName]
+		if !ok {
+			t.Errorf("unexpected flow %q", r.ServerName)
+			continue
+		}
+		if r.PQ != w {
+			t.Errorf("%s: PQ = %q, want %q", r.ServerName, r.PQ, w)
+		}
+		delete(want, r.ServerName)
+	}
+	for name := range want {
+		t.Errorf("%s: flow missing — its ClientHello spans two Initial packets", name)
+	}
+}
+
+// A QUIC connection has no cleartext close, so flows are released by the
+// idle sweep. They must still be reported.
+func TestQUICFlowsUnwind(t *testing.T) {
+	_, stats := readCapture(t, quicPcap, assemble.Options{})
+	if stats.LiveStreams != 0 {
+		t.Errorf("LiveStreams = %d after close, want 0", stats.LiveStreams)
+	}
+	if stats.StreamsDropped != 0 {
+		t.Errorf("StreamsDropped = %d, want 0", stats.StreamsDropped)
+	}
+}

@@ -60,7 +60,7 @@ func OpenLive(iface string, opts LiveOptions) (Source, error) {
 	// AF_PACKET always delivers Ethernet frames.
 	linkType := layers.LinkTypeEthernet
 	if !opts.NoFilter {
-		filter, err := TCPFilter(linkType, opts.Snaplen)
+		filter, err := CaptureFilter(linkType, opts.Snaplen)
 		if err != nil {
 			h.Close()
 			return nil, err
