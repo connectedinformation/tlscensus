@@ -11,9 +11,11 @@ builds:
   - id: tlscensus
     main: ./cmd/tlscensus
     binary: tlscensus
-    # M1 is pure Go, so every target cross-compiles from one runner. When
-    # live capture lands (M2) the libpcap backend goes behind a build tag
-    # and this splits into a per-OS matrix with cgo enabled.
+    # Every target cross-compiles from one runner, live capture included.
+    # This was expected to need a per-OS matrix with cgo once capture landed;
+    # it did not. Linux uses AF_PACKET, macOS reads /dev/bpf directly, and
+    # Windows loads wpcap.dll at runtime — so no libpcap is linked anywhere
+    # and CGO stays off.
     env:
       - CGO_ENABLED=0
     goos: [linux, darwin, windows]
@@ -39,16 +41,43 @@ checksum:
 sboms:
   - artifacts: archive
 
-brews:
-  - repository:
+# `brews` was deprecated in GoReleaser 2.x in favour of casks, which is how
+# Homebrew now prefers prebuilt binaries to be distributed.
+homebrew_casks:
+  - name: tlscensus
+    repository:
       owner: tlscensus
       name: homebrew-tap
       token: '{{ .Env.HOMEBREW_TAP_TOKEN }}'
     homepage: https://github.com/tlscensus/tlscensus
     description: Passive TLS cryptography inventory
     license: Apache-2.0
-    test: |
-      system "#{bin}/tlscensus", "version"
+    binaries:
+      - tlscensus
+    # The release binaries are not signed or notarised, and Homebrew
+    # quarantines what a cask downloads. macOS then refuses to run the
+    # binary at all — "the developer cannot be verified" — which looks like
+    # a broken install rather than a signing policy. Clearing the attribute
+    # is what an unsigned cask has to do; notarisation would need an Apple
+    # Developer account and is a later decision.
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/tlscensus"]
+          end
+    caveats: |
+      Reading capture files needs no privileges:
+
+          tlscensus read capture.pcap
+
+      Live capture reads /dev/bpf*, which is root-only by default:
+
+          sudo tlscensus watch
+
+      To capture without running the whole tool as root, put yourself in the
+      access_bpf group as Wireshark does. See:
+      https://github.com/tlscensus/tlscensus/blob/main/docs/permissions.md
 
 nfpms:
   - formats: [deb, rpm]
@@ -56,6 +85,14 @@ nfpms:
     homepage: https://github.com/tlscensus/tlscensus
     description: Passive TLS cryptography inventory
     license: Apache-2.0
+    contents:
+      - src: docs/permissions.md
+        dst: /usr/share/doc/tlscensus/permissions.md
+      - src: docs/validation.md
+        dst: /usr/share/doc/tlscensus/validation.md
+    # Prints the setcap step rather than running it; see the script.
+    scripts:
+      postinstall: scripts/postinstall.sh
 
 changelog:
   use: github

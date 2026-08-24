@@ -40,6 +40,59 @@ against a reference implementation.
 
 ## Install
 
+Reading capture files needs no privileges on any platform. Live capture
+needs one extra step everywhere — see
+[docs/permissions.md](docs/permissions.md).
+
+**macOS and Linux — Homebrew**
+
+```sh
+brew install tlscensus/tap/tlscensus
+```
+
+**Linux — package**
+
+```sh
+sudo dpkg -i tlscensus_*_linux_amd64.deb     # or: sudo rpm -i tlscensus-*.rpm
+sudo setcap cap_net_raw=eip $(command -v tlscensus)
+```
+
+The package prints that `setcap` line on install. It does not run it:
+granting a binary raw-socket capability is the administrator's decision, and
+it has to be reapplied after every upgrade because replacing the binary
+clears it.
+
+**Windows**
+
+```powershell
+# 1. Install Npcap from https://npcap.com  (not bundled — its licence
+#    forbids redistribution. If Wireshark is installed, so is Npcap.)
+# 2. Extract tlscensus.exe from the release .zip onto your PATH.
+```
+
+**Any platform — verified download**
+
+```sh
+curl -fsSLO https://github.com/tlscensus/tlscensus/releases/latest/download/checksums.txt
+curl -fsSLO https://github.com/tlscensus/tlscensus/releases/latest/download/tlscensus_Linux_x86_64.tar.gz
+sha256sum --ignore-missing -c checksums.txt
+tar xzf tlscensus_*.tar.gz && sudo install tlscensus /usr/local/bin/
+```
+
+Every release ships checksums and an SBOM. There is deliberately no
+`curl | sh` installer: this tool runs as root and its readers are security
+engineers, so piping a URL into a root shell would route around exactly the
+verification the release provides.
+
+**The binaries are not code-signed or notarised.** Verify the checksum
+instead — that is what `checksums.txt` is for. On macOS this means Gatekeeper
+would otherwise refuse a Homebrew-installed binary, so the cask clears the
+quarantine attribute on install; if you download the archive by hand and
+macOS blocks it, `xattr -dr com.apple.quarantine ./tlscensus` is the same
+step done yourself.
+
+**From source**
+
 ```sh
 go install github.com/tlscensus/tlscensus/cmd/tlscensus@latest
 ```

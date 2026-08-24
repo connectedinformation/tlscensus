@@ -165,6 +165,16 @@ not. v0.1 ships first.
 
 ## Deliberately out of scope
 
+- **A `curl | sh` install script.** Fine engineering, and the wrong fit
+  here. This tool's readers are security engineers and it runs as root, so
+  asking them to pipe a URL into a root shell contradicts everything else
+  the project does — and routes around the checksums and SBOMs the release
+  already publishes. Homebrew covers macOS and Linux, `.deb`/`.rpm` cover
+  the rest, and for this audience a documented checksum-verification step
+  reads as more trustworthy than a one-liner, not less. If it is ever added,
+  it must be a release artifact pinned to a tag, never a mutable URL, and
+  the documented form must verify before executing.
+
 - **Active scanning.** Passive observation only. `testssl.sh` and `sslyze`
   do the active job well.
 - **Interception, proxying, decryption.** Not a MITM tool, now or later.
