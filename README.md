@@ -123,7 +123,10 @@ than no inventory.
   port, not by the application that opened them. On macOS the `pktap`
   pseudo-device would provide this nearly free; its link type is not decoded
   yet, so `watch` refuses it explicitly rather than capturing nothing.
-- **Windows live capture** is not implemented (M4). `read` works there today.
+- **Windows live capture is written but unverified** (M4) — it has never
+  been run on a Windows machine, so treat it as untested. `read` works there
+  today. Live capture needs [Npcap](https://npcap.com), installed
+  separately; tlscensus loads it at runtime and does not bundle it.
 - **STARTTLS is not tracked.** A session that begins as cleartext SMTP or
   IMAP and upgrades in place is not currently detected.
 - **Resumed sessions** carry no full handshake, so they report what the

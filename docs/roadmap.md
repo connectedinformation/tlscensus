@@ -9,7 +9,7 @@ direction that flatters the tool.
 | **M1** | Parser, TCP reassembly, capture-file reader, JSON/NDJSON/text output | **done** | Differential-clean against `tshark` on a real corpus — see [validation.md](validation.md) |
 | **M2** | Live capture on Linux and macOS | **done** | |
 | **M3** | Local web report + CycloneDX CBOM export | **done** | |
-| **M4** | Windows capture | not started | **earliest honest public v0.1** |
+| **M4** | Windows capture | **code-complete, unverified** | **earliest honest public v0.1** |
 | **M5** | QUIC / HTTP-3 | not started | **earliest honest "PQ readiness" headline** |
 | **M6** | Process attribution | not started | |
 
@@ -62,13 +62,32 @@ per-process pseudo-device would give process attribution nearly free, but its
 link type is not decoded, so `watch` rejects it with an explicit message
 rather than silently capturing nothing. That is M6.
 
-**M4 — Windows.** Npcap is libpcap-API-compatible, so the capture layer is
-close to a drop-in. **Its licence does not permit redistribution inside a
-commercial product**; for an open-source tool, telling users to install
-Npcap themselves is normal and Wireshark has trained the market on it. The
-driver-free alternatives are `pktmon` (built in since Windows 10 1809) and
-WFP; both are more awkward for real-time work and are optimisations, not
-blockers.
+**M4 — Windows.** Written, compiling and vetting clean, and **not yet run on
+a Windows machine**. It is not done until it has been.
+
+Npcap is driven through runtime DLL loading rather than cgo, so the binary
+stays cgo-free like the other two platforms: one runner still produces every
+release target, `go install` needs no C toolchain or Npcap SDK, and a machine
+without Npcap can still run `tlscensus read`. Npcap is installed by the user;
+its licence does not permit redistribution, which for an open-source tool is
+normal friction rather than a blocker.
+
+What cannot be checked from a Mac is exactly what broke on the other two
+platforms: structure layout. Windows is LLP64, so `long` stays 32 bits and
+`struct timeval` inside `struct pcap_pkthdr` is 8 bytes rather than the 16 it
+occupies on 64-bit Unix. Getting that wrong does not crash — it shifts
+`caplen` and `len` by eight bytes and yields no usable packets. Since there
+is no parser to unit-test here, `live_windows_test.go` asserts the sizes and
+field offsets directly and CI runs it on a real Windows machine, which is the
+closest an automated check can get.
+
+The remaining gap is the same one M2 had: nothing has confirmed that packets
+actually arrive. That needs the smoke test in
+[validation.md](validation.md) on a machine with Npcap installed.
+
+The driver-free alternatives, `pktmon` (built in since Windows 10 1809) and
+WFP, remain optimisations rather than blockers — worth revisiting only if
+requiring Npcap proves to be real friction.
 
 **M5 — QUIC.** Initial packets are protected with keys derived from the
 Destination Connection ID (RFC 9001), so the ClientHello and ServerHello are

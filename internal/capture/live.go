@@ -93,9 +93,19 @@ type InterfaceInfo struct {
 	Addresses []string
 }
 
-// Interfaces lists the network interfaces on this host. It uses the standard
-// library, so it needs no privileges and works identically everywhere.
+// Interfaces lists the network interfaces capture can be opened on.
+//
+// The names it returns are the names `watch -i` accepts, which is why this
+// is not simply net.Interfaces() everywhere: on Windows the capture device
+// is an Npcap GUID path, and listing the friendly adapter names would print
+// names that cannot be used.
 func Interfaces() ([]InterfaceInfo, error) {
+	return platformInterfaces()
+}
+
+// stdlibInterfaces is the portable listing, used wherever the capture
+// backend takes the same names the operating system uses.
+func stdlibInterfaces() ([]InterfaceInfo, error) {
 	ifs, err := net.Interfaces()
 	if err != nil {
 		return nil, err
@@ -135,7 +145,7 @@ func DefaultInterface() (string, error) {
 // LiveSupported reports whether this build can capture live traffic.
 func LiveSupported() bool {
 	switch runtime.GOOS {
-	case "linux", "darwin":
+	case "linux", "darwin", "windows":
 		return true
 	}
 	return false

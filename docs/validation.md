@@ -21,7 +21,7 @@ without invented fields.
 the accessors and the registry lookups. Clean at 7.1M executions on the
 initial corpus. Not yet running continuously.
 
-### Live capture — verified on macOS and Linux
+### Live capture — verified on macOS and Linux; Windows unverified
 
 `watch` has been run against a real interface on both platforms and reports
 live handshakes correctly: SNI, negotiated version, cipher suite and key
@@ -36,6 +36,14 @@ correctly.
 
 On Linux (AF_PACKET via `pcapgo.EthernetHandle`), capture was verified and
 four further defects were found and fixed; see below.
+
+**Windows is written but unverified.** It compiles and vets, and
+`live_windows_test.go` asserts the `pcap_pkthdr`, `bpf_program` and `pcap_if`
+layouts on a real Windows machine in CI — which covers the LLP64 trap that is
+this platform's equivalent of the `bh_hdrlen` bug. What no automated check
+covers is whether packets actually arrive, so the smoke test below must be
+run on a machine with Npcap installed before Windows can be called done. On
+the two platforms already verified, that step found three defects apiece.
 
 `advertised_only` has still not been observed on real traffic. It is covered
 by the synthetic capture, but no live client has yet been seen advertising a

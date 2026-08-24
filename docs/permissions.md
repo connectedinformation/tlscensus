@@ -73,7 +73,50 @@ Capture is a plain read of a character device.
 
 ## Windows
 
-Not yet implemented. See [roadmap.md](roadmap.md) — M4.
+Live capture needs **Npcap**, which you install yourself from
+<https://npcap.com>. tlscensus does not bundle it: Npcap's licence does not
+permit redistribution, and shipping a driver inside an inventory tool would
+be a poor trade even if it did. If Wireshark is installed, Npcap almost
+certainly is too.
+
+Reading a capture file needs none of this, on any platform:
+
+```powershell
+tlscensus read capture.pcap
+```
+
+tlscensus loads `wpcap.dll` at runtime rather than linking it, so the binary
+runs on a machine that has never had Npcap installed — only `watch` and
+`serve -i` ask for the driver, and they explain what to install when it is
+missing.
+
+### Two installer options that change behaviour
+
+**"Restrict Npcap driver's access to Administrators only."** If this was
+selected, capture needs an elevated prompt:
+
+```powershell
+# Run PowerShell as Administrator
+tlscensus watch
+```
+
+Otherwise re-run the Npcap installer and clear the option.
+
+**"Install Npcap in WinPcap API-compatible Mode."** This puts `wpcap.dll`
+into `System32` as well as `System32\Npcap`. tlscensus looks in both, so
+either arrangement works.
+
+### Picking an interface
+
+Npcap device names are GUID paths — `\Device\NPF_{A1B2C3D4-...}` — not the
+adapter names Windows shows. `tlscensus interfaces` lists what is actually
+capturable, with the adapter description and its addresses, and `-i` accepts
+any unique substring of that description:
+
+```powershell
+tlscensus interfaces
+tlscensus watch -i "Wi-Fi"
+```
 
 ## What promiscuous mode does, and why it is off
 
