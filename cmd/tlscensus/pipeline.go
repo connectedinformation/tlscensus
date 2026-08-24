@@ -113,6 +113,26 @@ func (p *pipeline) run(src capture.Source) error {
 	}
 }
 
+// snapshot builds a report from a pipeline that is still running. Unlike
+// finish it does not close the assembler, so flows still in flight stay in
+// flight and the capture continues.
+func (p *pipeline) snapshot(sources []string, top int) (*report.Report, []*inventory.Record) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	records := make([]*inventory.Record, len(p.records))
+	copy(records, p.records)
+	report.SortRecords(records)
+	return &report.Report{
+		Tool:        "tlscensus",
+		Version:     version,
+		GeneratedAt: time.Now().UTC(),
+		Sources:     sources,
+		Stats:       p.asm.Stats(),
+		Summary:     p.acc.Summary(top),
+	}, records
+}
+
 func (p *pipeline) finish(sources []string, top int, withRecords bool) *report.Report {
 	p.mu.Lock()
 	p.asm.Close()
@@ -163,6 +183,10 @@ func writeReport(format string, rep *report.Report, records []*inventory.Record)
 		return report.WriteNDJSON(out, records)
 	case "json":
 		return report.WriteJSON(out, rep)
+	case "cbom":
+		return report.WriteCBOM(out, rep, records)
+	case "html":
+		return report.WriteHTML(out, rep, records)
 	default:
 		return report.WriteText(out, rep)
 	}
@@ -170,8 +194,8 @@ func writeReport(format string, rep *report.Report, records []*inventory.Record)
 
 func validateFormat(format string) error {
 	switch format {
-	case "text", "json", "ndjson":
+	case "text", "json", "ndjson", "cbom", "html":
 		return nil
 	}
-	return fmt.Errorf("unknown output format %q (want text, json or ndjson)", format)
+	return fmt.Errorf("unknown output format %q (want text, json, ndjson, cbom or html)", format)
 }

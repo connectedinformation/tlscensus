@@ -365,3 +365,34 @@ func VersionName(v uint16) string {
 	}
 	return fmt.Sprintf("%#04x", v)
 }
+
+// ------------------------------------------------------- reverse lookup
+
+// Reverse indexes, built once. Callers that hold a rendered name — a report
+// writer reading back its own output, for instance — need the codepoint to
+// emit an identifier, and scanning the forward table per lookup is both slow
+// and easy to get subtly wrong.
+var (
+	cipherIDs = reverseIndex(cipherSuiteNames)
+	groupIDs  = reverseIndex(groupNames)
+)
+
+func reverseIndex(m map[uint16]string) map[string]uint16 {
+	out := make(map[string]uint16, len(m))
+	for id, name := range m {
+		out[name] = id
+	}
+	return out
+}
+
+// CipherByName returns the codepoint for an IANA cipher suite name.
+func CipherByName(name string) (uint16, bool) {
+	id, ok := cipherIDs[name]
+	return id, ok
+}
+
+// GroupByName returns the codepoint for a named group.
+func GroupByName(name string) (uint16, bool) {
+	id, ok := groupIDs[name]
+	return id, ok
+}

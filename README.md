@@ -56,6 +56,12 @@ tlscensus read -o json -records *.pcap > inventory.json
 tlscensus interfaces
 sudo tlscensus watch -i en0
 sudo tlscensus watch -o ndjson | tee handshakes.ndjson
+
+# Report
+tlscensus read -o html capture.pcap > report.html   # self-contained page
+tlscensus read -o cbom capture.pcap > crypto.cdx.json
+tlscensus serve capture.pcap                         # loopback + token
+sudo tlscensus serve -i en0                          # live, auto-refreshing
 ```
 
 **No cgo, anywhere.** Linux capture is `AF_PACKET`; macOS reads `/dev/bpf*`
@@ -122,6 +128,27 @@ than no inventory.
   IMAP and upgrades in place is not currently detected.
 - **Resumed sessions** carry no full handshake, so they report what the
   client offered and little else.
+
+## Output
+
+| Format | Use |
+|---|---|
+| `text` | terminal summary (default) |
+| `ndjson` | one record per line, for `jq` or a log shipper |
+| `json` | the whole report, with `-records` for per-flow detail |
+| `html` | self-contained page — no network access, no fonts, no CDN |
+| `cbom` | CycloneDX 1.6 with `cryptographic-asset` components |
+
+The CBOM is what makes this a feed into other tooling rather than one more
+dashboard: post-quantum readiness is a property of your estate, not of this
+program. Its serial number is derived from the asset set rather than from
+randomness, so two runs over the same inventory produce the same document
+and can be diffed. Validate with `scripts/validate-cbom.sh`.
+
+`tlscensus serve` puts the report on **127.0.0.1 only**, behind a token
+minted at startup. There is no flag to bind a routable address. Loopback by
+itself is not an authorisation boundary — every local user can reach it —
+which is why the token exists too.
 
 ## Privacy
 

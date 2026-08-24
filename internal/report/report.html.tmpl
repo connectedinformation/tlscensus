@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{{if .Refresh}}<meta http-equiv="refresh" content="{{.Refresh}}">{{end}}
+<title>tlscensus report</title>
+<style>
+/* Light is the base; dark redefines only the tokens, under both the OS
+   media query and an explicit theme stamp. No colour is defined solely
+   inside a media block. */
+:root {
+  color-scheme: light;
+  --surface:        #fcfcfb;
+  --surface-raised: #ffffff;
+  --surface-sunken: #f0efec;
+  --border:         #e2e1dc;
+  --text-primary:   #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted:     #767570;
+  --series-1:       #2a78d6;
+  --track:          #e6eefb;
+  /* Ordinal ramp for the readiness ladder: on light, no step lighter
+     than 250, so the first rung still clears 2:1 against the surface. */
+  --pq-0: #86b6ef;
+  --pq-1: #5598e7;
+  --pq-2: #2a78d6;
+  --pq-3: #184f95;
+  --pq-unknown: #c9c8c2;
+  /* Status palette is fixed, never themed. */
+  --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --surface:        #1a1a19;
+    --surface-raised: #232322;
+    --surface-sunken: #131312;
+    --border:         #383835;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #96958c;
+    --series-1:       #3987e5;
+    --track:          #23303f;
+    /* On dark the ramp runs the other way: no step darker than 600, so
+       the first rung still separates from the surface. */
+    --pq-0: #184f95;
+    --pq-1: #256abf;
+    --pq-2: #3987e5;
+    --pq-3: #9ec5f4;
+    --pq-unknown: #4a4a46;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface:        #1a1a19;
+  --surface-raised: #232322;
+  --surface-sunken: #131312;
+  --border:         #383835;
+  --text-primary:   #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted:     #96958c;
+  --series-1:       #3987e5;
+  --track:          #23303f;
+  --pq-0: #184f95; --pq-1: #256abf; --pq-2: #3987e5; --pq-3: #9ec5f4;
+  --pq-unknown: #4a4a46;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 2rem 1.5rem 4rem;
+  background: var(--surface); color: var(--text-primary);
+  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+main { max-width: 1080px; margin: 0 auto; }
+h1 { font-size: 1.25rem; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+h2 {
+  font-size: 0.78rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--text-secondary);
+  margin: 2.5rem 0 0.85rem;
+}
+.sub { color: var(--text-secondary); font-size: 0.85rem; margin: 0.3rem 0 0; }
+.meta { color: var(--text-muted); font-size: 0.78rem; margin: 0.15rem 0 0; }
+header { border-bottom: 1px solid var(--border); padding-bottom: 1.25rem; }
+
+/* Hero — exactly one per page. Proportional figures: tabular-nums makes a
+   large standalone number look loose. */
+.hero { margin: 2rem 0 0.5rem; }
+.hero-value { font-size: 3.75rem; font-weight: 600; line-height: 1; letter-spacing: -0.03em; }
+.hero-label { font-size: 0.95rem; font-weight: 600; margin-top: 0.4rem; }
+.hero-note { color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.15rem; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0.75rem; margin-top: 1.75rem; }
+.tile { background: var(--surface-raised); border: 1px solid var(--border); border-radius: 10px; padding: 0.85rem 1rem; }
+.tile-label { font-size: 0.75rem; color: var(--text-secondary); }
+.tile-value { font-size: 1.65rem; font-weight: 600; line-height: 1.15; margin-top: 0.15rem; }
+.tile-note { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.2rem; }
+
+/* Stacked ladder. Segments are separated by a 2px gap in the surface
+   colour, not by a border — the gap is the separator. */
+.ladder { display: flex; width: 100%; height: 30px; gap: 2px; }
+.ladder-seg { position: relative; border-radius: 2px; min-width: 3px; }
+.ladder-seg:first-child { border-radius: 4px 2px 2px 4px; }
+.ladder-seg:last-child  { border-radius: 2px 4px 4px 2px; }
+.pq-unknown { background: var(--pq-unknown); }
+.pq-0 { background: var(--pq-0); } .pq-1 { background: var(--pq-1); }
+.pq-2 { background: var(--pq-2); } .pq-3 { background: var(--pq-3); }
+.ladder-labels { display: flex; flex-wrap: wrap; gap: 0.35rem 1.1rem; margin-top: 0.6rem; }
+.key { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.78rem; color: var(--text-secondary); }
+.swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.key b { color: var(--text-primary); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Distribution bars: one series, so no legend — the heading names it.
+   Values are direct-labelled rather than hovered. */
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 0 2.25rem; }
+/* Label above the bar, not beside it. A single-line layout gives the name
+   whatever the bar leaves over, which truncates exactly the tail that
+   distinguishes TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256 from its
+   neighbours. */
+.dist-row { margin-bottom: 0.55rem; }
+.dist-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; }
+.dist-name { font-size: 0.82rem; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dist-val { flex: none; font-size: 0.76rem; color: var(--text-secondary);
+  font-variant-numeric: tabular-nums; }
+.bar-track { background: var(--track); border-radius: 4px; height: 10px; margin-top: 0.22rem; }
+.bar-fill { background: var(--series-1); height: 10px; border-radius: 0 4px 4px 0; min-width: 2px; }
+
+/* Status colours ship with an icon and the severity word, never alone. */
+.finding { display: flex; gap: 0.7rem; align-items: baseline; padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
+.finding:last-child { border-bottom: none; }
+.sev { display: inline-flex; align-items: baseline; gap: 0.35rem; font-size: 0.72rem;
+  font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; min-width: 92px; }
+.sev-critical { color: var(--critical); } .sev-high { color: var(--serious); }
+.sev-medium  { color: var(--warning);  } .sev-low  { color: var(--text-secondary); }
+.sev-info    { color: var(--text-muted); }
+.finding-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+.finding-count { color: var(--text-secondary); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+.finding-detail { color: var(--text-secondary); font-size: 0.82rem; flex: 1; }
+
+table.flows { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 0.5rem; }
+table.flows th { text-align: left; font-weight: 600; color: var(--text-secondary);
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--border); padding: 0.4rem 0.6rem 0.4rem 0; }
+table.flows td { padding: 0.32rem 0.6rem 0.32rem 0; border-bottom: 1px solid var(--border);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+table.flows td.num { font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+input[type=search] {
+  width: 100%; max-width: 320px; padding: 0.4rem 0.6rem; font: inherit; font-size: 0.85rem;
+  background: var(--surface-raised); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: 7px;
+}
+footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border);
+  color: var(--text-muted); font-size: 0.75rem; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>tlscensus report</h1>
+  <p class="sub">{{range $i, $s := .Report.Sources}}{{if $i}}, {{end}}{{$s}}{{end}}</p>
+  <p class="meta">
+    {{if .Window}}Captured {{.Window}} · {{end}}Generated {{.Generated}} · tlscensus {{.Report.Version}}{{if .Live}} · <strong>capturing</strong>, this page refreshes every {{.Refresh}}s{{end}}
+  </p>
+</header>
+
+{{if .HasHero}}
+<section class="hero">
+  <div class="hero-value">{{.HeroValue}}</div>
+  <div class="hero-label">{{.HeroLabel}}</div>
+  <div class="hero-note">{{.HeroNote}}</div>
+</section>
+{{end}}
+
+<section class="tiles">
+  {{range .Tiles}}
+  <div class="tile">
+    <div class="tile-label">{{.Label}}</div>
+    <div class="tile-value">{{.Value}}</div>
+    {{if .Note}}<div class="tile-note">{{.Note}}</div>{{end}}
+  </div>
+  {{end}}
+</section>
+
+{{if .Ladder}}
+<h2>Post-quantum readiness</h2>
+<div class="ladder">
+  {{range .Ladder}}
+  <div class="ladder-seg {{.Class}}" style="width:{{pct .Width}}%"
+       title="{{.Label}}: {{.Count}} of {{$.LadderTotal}}"></div>
+  {{end}}
+</div>
+<div class="ladder-labels">
+  {{range .Ladder}}
+  <span class="key"><span class="swatch {{.Class}}"></span>{{.Label}} <b>{{.Count}}</b> ({{pct .Pct}}%)</span>
+  {{end}}
+</div>
+{{end}}
+
+{{if .Findings}}
+<h2>Findings</h2>
+{{range .Findings}}
+<div class="finding">
+  <span class="sev {{.Class}}"><span aria-hidden="true">{{.Icon}}</span>{{.Severity}}</span>
+  <span class="finding-id">{{.ID}}</span>
+  <span class="finding-count">×{{.Count}}</span>
+  <span class="finding-detail">{{.Detail}}</span>
+</div>
+{{end}}
+{{end}}
+
+<div class="grid">
+{{range .Sections}}{{if .Rows}}
+<div>
+  <h2>{{.Title}}{{if .Note}} <span style="text-transform:none;letter-spacing:0;font-weight:400">— {{.Note}}</span>{{end}}</h2>
+  {{range .Rows}}
+  <div class="dist-row">
+    <div class="dist-head">
+      <span class="dist-name" title="{{.Name}}">{{.Name}}</span>
+      <span class="dist-val">{{.Count}} · {{pct .Pct}}%</span>
+    </div>
+    <div class="bar-track"><div class="bar-fill" style="width:{{pct .Width}}%"></div></div>
+  </div>
+  {{end}}
+</div>
+{{end}}{{end}}
+</div>
+
+{{if .Records}}
+<h2>Handshakes</h2>
+<input type="search" id="flowFilter" placeholder="Filter by name, cipher, group…" aria-label="Filter handshakes">
+<table class="flows" id="flowTable">
+  <thead><tr>
+    <th>Server name</th><th>Destination</th><th>Version</th>
+    <th>Cipher suite</th><th>Group</th><th>PQ</th><th>JA4</th>
+  </tr></thead>
+  <tbody>
+  {{range .Records}}
+  <tr>
+    <td title="{{.ServerName}}">{{if .ServerName}}{{.ServerName}}{{else}}—{{end}}{{if .ECH}} <span class="finding-count">(ech)</span>{{end}}</td>
+    <td class="num">{{.ServerIP}}:{{.ServerPort}}</td>
+    <td>{{if .ServerObserved}}{{.Version}}{{else}}{{.VersionOffered}} offered{{end}}</td>
+    <td title="{{.CipherSuite}}">{{if .CipherSuite}}{{.CipherSuite}}{{else}}—{{end}}</td>
+    <td>{{if .Group}}{{.Group}}{{else}}—{{end}}</td>
+    <td>{{.PQ}}</td>
+    <td class="num">{{.JA4}}</td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+{{if .Truncated}}<p class="meta">{{.Truncated}} further handshakes omitted from this table; the
+summary above counts all of them. Use <code>-o ndjson</code> for the complete set.</p>{{end}}
+{{end}}
+
+<footer>
+  Generated by tlscensus — passive TLS cryptography inventory.
+  This page is self-contained and loads nothing from the network.
+  It lists every hostname the captured traffic requested; treat it as you
+  would browsing history.
+</footer>
+
+</main>
+<script>
+// The only script on the page. Filtering a long handshake table is worth
+// it; nothing else here needs JavaScript, and a report that cannot be read
+// with scripts disabled would be a worse report.
+(function () {
+  var input = document.getElementById('flowFilter');
+  if (!input) return;
+  var rows = Array.prototype.slice.call(
+    document.querySelectorAll('#flowTable tbody tr'));
+  input.addEventListener('input', function () {
+    var q = input.value.toLowerCase();
+    rows.forEach(function (row) {
+      row.style.display = !q || row.textContent.toLowerCase().indexOf(q) !== -1 ? '' : 'none';
+    });
+  });
+})();
+</script>
+</body>
+</html>

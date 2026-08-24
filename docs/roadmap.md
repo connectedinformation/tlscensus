@@ -8,7 +8,7 @@ direction that flatters the tool.
 |---|---|---|---|
 | **M1** | Parser, TCP reassembly, capture-file reader, JSON/NDJSON/text output | **done** | Differential-clean against `tshark` on a real corpus — see [validation.md](validation.md) |
 | **M2** | Live capture on Linux and macOS | **done** | |
-| **M3** | Local web report + CycloneDX CBOM export | not started | |
+| **M3** | Local web report + CycloneDX CBOM export | **done** | |
 | **M4** | Windows capture | not started | **earliest honest public v0.1** |
 | **M5** | QUIC / HTTP-3 | not started | **earliest honest "PQ readiness" headline** |
 | **M6** | Process attribution | not started | |
@@ -26,6 +26,17 @@ providers who deployed hybrid key exchange first. Publishing a readiness
 percentage while ignoring HTTP/3 biases the figure downward on exactly the
 networks doing best. It is also the first thing a competent evaluator will
 check.
+
+**M3 — report and CBOM.** Done. `-o html` writes a self-contained page
+(inline CSS, no fonts, no network) and `-o cbom` writes CycloneDX 1.6 with
+`cryptographic-asset` components, validated against the published schema by
+`scripts/validate-cbom.sh`. `tlscensus serve` puts the same report on
+loopback with a token.
+
+The CBOM is the interoperability story: it makes this a feed into
+procurement and compliance tooling rather than another dashboard. Its serial
+number is derived from the asset set rather than from randomness, so the
+same inventory produces the same document and two runs can be diffed.
 
 ## Notes on the unbuilt parts
 

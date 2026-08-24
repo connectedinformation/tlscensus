@@ -18,11 +18,12 @@ const usage = `tlscensus — passive TLS cryptography inventory
 Usage:
   tlscensus read [flags] FILE...   read pcap/pcapng capture files
   tlscensus watch [flags]          capture live from an interface
+  tlscensus serve [flags] [FILE...]  serve a report on loopback
   tlscensus interfaces             list capturable interfaces
   tlscensus version
 
 Common flags:
-  -o, -output FORMAT   text, json or ndjson (default text)
+  -o, -output FORMAT   text, json, ndjson, cbom or html (default text)
   -top N               entries per distribution (default 15)
   -max-prefix BYTES    bytes retained per stream direction (default 32768)
   -max-streams N       concurrently tracked connections (default 8192)
@@ -41,6 +42,10 @@ Examples:
   tlscensus read -o ndjson capture.pcapng | jq 'select(.pq_status=="classical")'
   sudo tlscensus watch -i en0
   sudo tlscensus watch -o ndjson | tee handshakes.ndjson
+  tlscensus read -o html capture.pcap > report.html
+  tlscensus read -o cbom capture.pcap > crypto.cdx.json
+  tlscensus serve capture.pcap
+  sudo tlscensus serve -i en0
 `
 
 func main() {
@@ -55,6 +60,8 @@ func main() {
 		err = runRead(os.Args[2:])
 	case "watch":
 		err = runWatch(os.Args[2:])
+	case "serve":
+		err = runServe(os.Args[2:])
 	case "interfaces":
 		err = runInterfaces(os.Args[2:])
 	case "version", "-v", "--version":
