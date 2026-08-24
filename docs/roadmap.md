@@ -9,7 +9,7 @@ direction that flatters the tool.
 | **M1** | Parser, TCP reassembly, capture-file reader, JSON/NDJSON/text output | **done** | Differential-clean against `tshark` on a real corpus — see [validation.md](validation.md) |
 | **M2** | Live capture on Linux and macOS | **done** | |
 | **M3** | Local web report + CycloneDX CBOM export | **done** | |
-| **M4** | Windows capture | **code-complete, unverified** | **earliest honest public v0.1** |
+| **M4** | Windows capture | **done** | **earliest honest public v0.1** |
 | **M5** | QUIC / HTTP-3 | **done** | **earliest honest "PQ readiness" headline** |
 | **M6** | Process attribution | not started | |
 
