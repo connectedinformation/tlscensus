@@ -27,10 +27,19 @@ import (
 const (
 	// Darwin defines BPF_ALIGNMENT as sizeof(int32_t).
 	bpfAlignment = 4
-	// sizeof(struct bpf_hdr) on Darwin. The header on the wire may be
-	// longer — bh_hdrlen carries the real value including padding — so this
-	// is only the minimum that must be present to read the header at all.
-	bpfHdrLen = 20
+	// Bytes of actual fields in struct bpf_hdr: an 8-byte timeval32, two
+	// uint32 lengths and a uint16 header length.
+	//
+	// Note this is 18, not sizeof(struct bpf_hdr). The C struct is padded
+	// to 20 for alignment, but the kernel sets bh_hdrlen to the unpadded
+	// field size and places the packet data at that offset. Requiring 20
+	// here rejects every real packet as malformed — and does so silently,
+	// because the caller simply discards the read buffer and loops. The
+	// symptom is a capture that runs forever and reports nothing.
+	//
+	// bh_hdrlen remains authoritative for where the data starts; this is
+	// only the minimum that must be present to read the header fields.
+	bpfHdrLen = 18
 	// Number of /dev/bpfN devices to try. They are exclusive-open, so a
 	// busy device means someone else is capturing, not a failure.
 	bpfDeviceCount = 256
@@ -100,7 +109,7 @@ func openBPFDevice() (fd int, device string, err error) {
 
 func (s *darwinSource) configure(iface string, opts LiveOptions) error {
 	// Buffer length must be set before the interface is attached.
-	if err := unix.IoctlSetInt(s.fd, unix.BIOCSBLEN, opts.BufferBytes); err != nil {
+	if err := ioctlSetU32(s.fd, unix.BIOCSBLEN, uint32(opts.BufferBytes)); err != nil {
 		return fmt.Errorf("setting BPF buffer length: %w", err)
 	}
 
@@ -122,7 +131,7 @@ func (s *darwinSource) configure(iface string, opts LiveOptions) error {
 	// Immediate mode: deliver each packet as it arrives instead of waiting
 	// for the buffer to fill. Without it a quiet interface reports nothing
 	// for minutes at a time.
-	if err := unix.IoctlSetInt(s.fd, unix.BIOCIMMEDIATE, 1); err != nil {
+	if err := ioctlSetU32(s.fd, unix.BIOCIMMEDIATE, 1); err != nil {
 		return fmt.Errorf("enabling immediate mode: %w", err)
 	}
 
@@ -135,12 +144,13 @@ func (s *darwinSource) configure(iface string, opts LiveOptions) error {
 	}
 
 	if opts.Promiscuous {
-		if err := unix.IoctlSetInt(s.fd, unix.BIOCPROMISC, 0); err != nil {
+		// BIOCPROMISC is IOC_VOID: it takes no argument at all.
+		if err := ioctlVoid(s.fd, unix.BIOCPROMISC); err != nil {
 			return fmt.Errorf("enabling promiscuous mode: %w", err)
 		}
 	}
 
-	dlt, err := unix.IoctlGetInt(s.fd, unix.BIOCGDLT)
+	dlt, err := ioctlGetU32(s.fd, unix.BIOCGDLT)
 	if err != nil {
 		return fmt.Errorf("reading link type: %w", err)
 	}
@@ -163,9 +173,12 @@ func (s *darwinSource) configure(iface string, opts LiveOptions) error {
 
 	// The kernel may have rounded the buffer length; always allocate what
 	// it actually chose, or reads will be truncated.
-	blen, err := unix.IoctlGetInt(s.fd, unix.BIOCGBLEN)
+	blen, err := ioctlGetU32(s.fd, unix.BIOCGBLEN)
 	if err != nil {
 		return fmt.Errorf("reading BPF buffer length: %w", err)
+	}
+	if blen == 0 {
+		return errors.New("kernel reported a zero-length BPF buffer")
 	}
 	s.buf = make([]byte, blen)
 	return nil
@@ -286,6 +299,34 @@ func nextBPFPacket(buf []byte) (data []byte, ci gopacket.CaptureInfo, rest []byt
 		rest = buf[next:]
 	}
 	return buf[hdrLen:end], ci, rest, nil
+}
+
+// BSD ioctls encoded with _IOW or _IOR take a *pointer* to their argument.
+// This is the opposite of the Linux convention, where an int argument is
+// commonly passed by value — and it is why x/sys/unix's IoctlSetInt, which
+// passes uintptr(value) directly, cannot be used for any of the BPF calls.
+// Doing so makes the kernel dereference the value as an address and return
+// EFAULT, which reads like a memory bug rather than a calling-convention
+// mismatch. Every BPF ioctl argument here is a u_int, so these helpers are
+// explicitly 32-bit rather than relying on a Go int happening to alias
+// correctly on little-endian.
+
+func ioctlSetU32(fd int, req uint, v uint32) error {
+	return ioctlPtr(fd, req, unsafe.Pointer(&v))
+}
+
+func ioctlGetU32(fd int, req uint) (uint32, error) {
+	var v uint32
+	err := ioctlPtr(fd, req, unsafe.Pointer(&v))
+	return v, err
+}
+
+// ioctlVoid issues an IOC_VOID request, which carries no argument.
+func ioctlVoid(fd int, req uint) error {
+	if _, _, e := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), uintptr(req), 0); e != 0 {
+		return e
+	}
+	return nil
 }
 
 func ioctlPtr(fd int, req uint, arg unsafe.Pointer) error {

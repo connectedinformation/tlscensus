@@ -106,6 +106,32 @@ func TestNextBPFPacketMultiple(t *testing.T) {
 // bh_hdrlen is authoritative: the kernel may pad the header beyond the
 // struct size. Computing the data offset from sizeof would work on one
 // architecture and quietly corrupt every packet on another.
+// The value macOS actually puts in bh_hdrlen is 18 — the unpadded field
+// size — not sizeof(struct bpf_hdr), which is 20. Rejecting 18 as too short
+// drops every packet the kernel delivers.
+//
+// The original test could not catch this: bpfRecord defaulted bh_hdrlen to
+// the same constant the parser validated against, so the oracle agreed with
+// the bug. Each real-world value is now asserted explicitly.
+func TestNextBPFPacketRealHeaderLengths(t *testing.T) {
+	payload := []byte("a packet the kernel actually delivered")
+	for _, hdrLen := range []int{18, 20, 24} {
+		buf := bpfRecord(payload, 1, 0, 0, hdrLen)
+		data, ci, _, err := nextBPFPacket(buf)
+		if err != nil {
+			t.Errorf("bh_hdrlen=%d: %v", hdrLen, err)
+			continue
+		}
+		if !bytes.Equal(data, payload) {
+			t.Errorf("bh_hdrlen=%d: data = %q, want %q", hdrLen, data, payload)
+		}
+		if ci.CaptureLength != len(payload) {
+			t.Errorf("bh_hdrlen=%d: CaptureLength = %d, want %d",
+				hdrLen, ci.CaptureLength, len(payload))
+		}
+	}
+}
+
 func TestNextBPFPacketHonoursHeaderLength(t *testing.T) {
 	payload := []byte("payload after a padded header")
 	buf := bpfRecord(payload, 1, 0, 0, bpfHdrLen+12)
@@ -131,7 +157,7 @@ func TestNextBPFPacketRejectsMalformed(t *testing.T) {
 	e.PutUint32(capTooLong[8:12], 1<<20) // caplen far past the buffer
 
 	hdrTooShort := bytes.Clone(full)
-	e.PutUint16(hdrTooShort[16:18], 4) // hdrlen inside the header itself
+	e.PutUint16(hdrTooShort[16:18], 12) // hdrlen below the field size
 
 	hdrHuge := bytes.Clone(full)
 	e.PutUint16(hdrHuge[16:18], 0xffff)

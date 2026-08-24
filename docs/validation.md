@@ -21,6 +21,63 @@ without invented fields.
 the accessors and the registry lookups. Clean at 7.1M executions on the
 initial corpus. Not yet running continuously.
 
+### Live capture — verified on macOS, not on Linux
+
+`watch` was run against a real interface on macOS (Darwin arm64, en0) and
+correctly reported live handshakes: SNI, negotiated version, cipher suite and
+group, with three of the four post-quantum states observed on real traffic —
+`post_quantum` (a browser offering X25519MLKEM768 and having it selected),
+`offered_not_selected` (a client offering a PQ key share to a server that
+chose x25519), and `classical`. The PQ ClientHello exceeded one TCP segment
+on the wire and was reassembled correctly.
+
+**The Linux AF_PACKET path has not been run against a real interface.** It
+compiles and vets cleanly, and it shares everything above the capture call
+with the verified macOS path, but the socket setup itself is untested.
+
+## The gap CI cannot close
+
+Two bugs shipped in M2 and both survived a green CI run, because both lived
+in the layer that needs a real file descriptor:
+
+1. `IoctlSetInt` passes its argument by value (the Linux convention), while
+   BSD `_IOW`/`_IOWR` ioctls take a pointer. `BIOCSBLEN` therefore returned
+   EFAULT.
+2. The minimum `bh_hdrlen` was checked against `sizeof(struct bpf_hdr)` (20)
+   rather than the unpadded field size (18) that the kernel actually writes.
+   Every packet was rejected as malformed, silently, because the recovery
+   path discards the read buffer and keeps reading.
+
+The second is the more instructive. The unit test built its records with
+`bh_hdrlen` defaulting to the same constant the parser validated against, so
+**the oracle inherited the bug**. This is the hazard `CONTRIBUTING.md`
+describes for keeping `tlssynth` independent of `tlsparse`, reproduced one
+package over. The test now asserts 18, 20 and 24 explicitly instead of
+deriving from the constant.
+
+The lesson is not "write more tests". Both parsers were tested and both
+tests passed. It is that a pure-function boundary makes the *parsing* free
+to verify, and leaves everything touching a descriptor unverified — so that
+part needs a manual smoke test, run deliberately, before any release.
+
+### Manual smoke test (required before tagging a release)
+
+CI has no network interface and no privileges, so this cannot be automated
+here. On each platform that claims live capture:
+
+```sh
+sudo ./tlscensus watch -i <iface>
+# in another shell: curl https://cloudflare.com/ >/dev/null
+# then Ctrl-C
+```
+
+Check that: handshake lines appear within a second or two of the traffic
+(not minutes later — that regression means connection close is not being
+processed); the summary reports a non-zero packet count; and a modern
+browser produces at least one `post_quantum` flow. If nothing appears at
+all, re-run with `-no-filter` to separate a kernel-filter fault from a
+read-path fault.
+
 ## Not yet validated
 
 ### JA4 / JA4S — provisional

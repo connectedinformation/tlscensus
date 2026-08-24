@@ -251,15 +251,31 @@ type stream struct {
 
 func (s *stream) Accept(tcp *layers.TCP, ci gopacket.CaptureInfo, dir reassembly.TCPFlowDirection,
 	nextSeq reassembly.Sequence, start *bool, ac reassembly.AssemblerContext) bool {
-	// Once the flow is understood, or ruled out, there is nothing further
-	// to learn from it and its payload need not be reassembled at all.
-	return !s.rejected && !(s.haveCH && s.haveSH)
+	// Always accept.
+	//
+	// It is tempting to return false once the handshake is understood or
+	// the flow ruled out, since no further payload is wanted. That is
+	// wrong: reassembly consults Accept *before* it processes FIN and RST,
+	// so refusing a packet also refuses the close. The connection then
+	// never completes, ReassemblyComplete never runs, and the flow is only
+	// emitted by the idle sweep minutes later — while its slot counts
+	// against MaxStreams the whole time.
+	//
+	// Offline this is invisible, because Close flushes everything at end of
+	// file. Live it means a handshake that finished a second ago is not
+	// reported for two minutes.
+	//
+	// Unwanted payload is dropped in ReassembledSG instead, which costs a
+	// function call per segment and retains nothing.
+	return true
 }
 
 func (s *stream) ReassembledSG(sg reassembly.ScatterGather, ac reassembly.AssemblerContext) {
 	dir, _, _, _ := sg.Info()
 	available, _ := sg.Lengths()
-	if available == 0 || s.rejected {
+	// Nothing is retained once the flow is understood or ruled out; the
+	// stream stays registered only so its close is still processed.
+	if available == 0 || s.rejected || (s.haveCH && s.haveSH) {
 		return
 	}
 	i := dirIndex(dir)

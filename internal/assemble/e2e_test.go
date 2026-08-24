@@ -263,15 +263,113 @@ func TestSummaryReadiness(t *testing.T) {
 	}
 }
 
+// concurrentPcap holds many connections open at once and never closes them.
+// The sample capture writes each connection start to finish before the next
+// begins, so with connection close handled properly no more than one is ever
+// in flight — the wrong shape for exercising the cap.
+const concurrentPcap = "../../testdata/concurrent.pcap"
+
+func readCapture(t *testing.T, path string, opts assemble.Options) ([]*inventory.Record, assemble.Stats) {
+	t.Helper()
+
+	var records []*inventory.Record
+	asm := assemble.New(func(f *assemble.Flow) {
+		records = append(records, inventory.Analyze(f))
+	}, opts)
+
+	src, err := capture.OpenFile(path)
+	if err != nil {
+		t.Fatalf("open %s: %v", path, err)
+	}
+	defer src.Close()
+	for {
+		data, ci, err := src.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		asm.Packet(data, ci, src.LinkType())
+	}
+	asm.Close()
+	return records, asm.Stats()
+}
+
 // The stream cap is what stops a busy host from multiplying the per-stream
 // prefix by an unbounded factor. When it bites, the shortfall must be
 // visible in Stats rather than silently absorbed — an inventory that
 // quietly stops counting is the failure this tool exists to avoid.
 func TestMaxStreamsIsEnforcedAndReported(t *testing.T) {
-	var records []*inventory.Record
+	records, stats := readCapture(t, concurrentPcap, assemble.Options{MaxStreams: 4})
+
+	if stats.Streams != 12 {
+		t.Errorf("Streams = %d, want 12 — dropped streams must still be counted", stats.Streams)
+	}
+	if stats.StreamsDropped != 8 {
+		t.Errorf("StreamsDropped = %d, want 8 (12 concurrent, cap 4)", stats.StreamsDropped)
+	}
+	if len(records) > 4 {
+		t.Errorf("emitted %d flows, want at most the cap of 4", len(records))
+	}
+	// Whatever was tracked must be reported, not lost.
+	if len(records) != 4 {
+		t.Errorf("emitted %d flows, want exactly the 4 that were tracked", len(records))
+	}
+}
+
+// At the default cap the same capture must be reported in full.
+func TestConcurrentCaptureFullyReported(t *testing.T) {
+	records, stats := readCapture(t, concurrentPcap, assemble.Options{})
+
+	if stats.StreamsDropped != 0 {
+		t.Errorf("StreamsDropped = %d at the default cap, want 0", stats.StreamsDropped)
+	}
+	if len(records) != 12 {
+		t.Fatalf("emitted %d flows, want 12", len(records))
+	}
+	// These connections never close, so they are released by the shutdown
+	// flush with client data only.
+	for _, r := range records {
+		if r.ServerObserved {
+			t.Errorf("%s: ServerObserved = true, but no response was captured", r.ServerName)
+		}
+		if r.PQ != inventory.PQOffered {
+			t.Errorf("%s: PQ = %q, want %q", r.ServerName, r.PQ, inventory.PQOffered)
+		}
+	}
+}
+
+// Without a cap the sample capture must be fully reported, and the live
+// count must still unwind.
+func TestLiveStreamAccountingUnwinds(t *testing.T) {
+	_, stats := readSample(t)
+	if stats.LiveStreams != 0 {
+		t.Errorf("LiveStreams = %d after close, want 0", stats.LiveStreams)
+	}
+	if stats.StreamsDropped != 0 {
+		t.Errorf("StreamsDropped = %d at the default cap, want 0", stats.StreamsDropped)
+	}
+}
+
+// Flows must be emitted when the connection closes, not held until the
+// assembler is shut down.
+//
+// This is the regression test for a bug that offline analysis cannot see.
+// reassembly consults Accept before handling FIN, so a stream that stops
+// accepting packets also stops seeing its own close: the flow is then only
+// released by the idle sweep, two minutes later. Reading a capture file hid
+// it entirely, because Close flushes everything at EOF. On a live interface
+// it meant a handshake that completed a second ago went unreported.
+func TestFlowsEmitOnCloseNotOnShutdown(t *testing.T) {
+	var duringRun int
+	var closed bool
+
 	asm := assemble.New(func(f *assemble.Flow) {
-		records = append(records, inventory.Analyze(f))
-	}, assemble.Options{MaxStreams: 3})
+		if !closed {
+			duringRun++
+		}
+	}, assemble.Options{})
 
 	src, err := capture.OpenFile(samplePcap)
 	if err != nil {
@@ -288,34 +386,14 @@ func TestMaxStreamsIsEnforcedAndReported(t *testing.T) {
 		}
 		asm.Packet(data, ci, src.LinkType())
 	}
+
+	closed = true
 	asm.Close()
 
-	stats := asm.Stats()
-	if stats.StreamsDropped == 0 {
-		t.Fatal("StreamsDropped = 0 with MaxStreams=3 over 11 streams")
-	}
-	if int64(len(records)) > 3 {
-		t.Errorf("emitted %d flows, want at most the 3-stream cap", len(records))
-	}
-	if stats.Streams != 11 {
-		t.Errorf("Streams = %d, want 11 — dropped streams must still be counted", stats.Streams)
-	}
-	// Every stream in the sample capture closes cleanly, so the live count
-	// must unwind to zero. A leak here would be invisible until a long run
-	// exhausted the cap and stopped reporting anything.
-	if stats.LiveStreams != 0 {
-		t.Errorf("LiveStreams = %d after close, want 0", stats.LiveStreams)
-	}
-}
-
-// Without a cap the sample capture must be fully reported, and the live
-// count must still unwind.
-func TestLiveStreamAccountingUnwinds(t *testing.T) {
-	_, stats := readSample(t)
-	if stats.LiveStreams != 0 {
-		t.Errorf("LiveStreams = %d after close, want 0", stats.LiveStreams)
-	}
-	if stats.StreamsDropped != 0 {
-		t.Errorf("StreamsDropped = %d at the default cap, want 0", stats.StreamsDropped)
+	// Every connection in the sample capture closes with FIN, so every
+	// flow must already have been reported before Close was called.
+	if want := 9; duringRun != want {
+		t.Errorf("%d of %d flows emitted on connection close; the rest waited "+
+			"for shutdown, which live capture cannot do", duringRun, want)
 	}
 }

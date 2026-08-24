@@ -58,19 +58,102 @@ const mss = 1460
 var baseTime = time.Date(2026, 8, 23, 10, 0, 0, 0, time.UTC)
 
 func main() {
-	out := "testdata/sample.pcap"
-	f, err := os.Create(out)
+	writeSample()
+	writeConcurrent()
+}
+
+// newCapture creates a pcap file and a generator writing into it.
+func newCapture(path string) (*gen, func()) {
+	f, err := os.Create(path)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer f.Close()
-
 	w := pcapgo.NewWriter(f)
 	if err := w.WriteFileHeader(65536, layers.LinkTypeEthernet); err != nil {
 		log.Fatal(err)
 	}
+	return &gen{w: w, now: baseTime}, func() { f.Close() }
+}
 
-	g := &gen{w: w, now: baseTime}
+// writeConcurrent produces a capture of many connections open at once and
+// never closed.
+//
+// The sample capture writes each connection start to finish before the next
+// begins, so at most one is ever in flight. That is the wrong shape for
+// testing the concurrent-stream cap: with connection close handled properly
+// the tracked count returns to zero between flows and no cap is ever
+// reached. Interleaving the segments, and omitting the FINs, models the case
+// the cap exists for — a busy host where connections accumulate.
+func writeConcurrent() {
+	const flows = 12
+	out := "testdata/concurrent.pcap"
+	g, closeFile := newCapture(out)
+	defer closeFile()
+
+	type conn struct {
+		cIP, sIP net.IP
+		sport    uint16
+		payload  []byte
+		cSeq     uint32
+		sSeq     uint32
+	}
+	conns := make([]*conn, flows)
+	for i := range conns {
+		ch := tlssynth.ClientHelloSpec{
+			Ciphers:           []uint16{tlsAES128GCMSHA256, tlsAES256GCMSHA384},
+			SNI:               fmt.Sprintf("host%02d.example", i),
+			ALPN:              []string{"h2"},
+			SupportedVersions: []uint16{tls13},
+			Groups:            []uint16{x25519MLKEM768, x25519},
+			KeyShares:         []uint16{x25519MLKEM768},
+			SigAlgs:           []uint16{0x0403, 0x0804},
+		}
+		conns[i] = &conn{
+			cIP:   net.ParseIP("192.168.1.60"),
+			sIP:   net.ParseIP(fmt.Sprintf("198.51.100.%d", i+1)),
+			sport: uint16(52000 + i),
+			payload: tlssynth.Records(tlssynth.RecordHandshake,
+				tlssynth.HandshakeMsg(tlssynth.MsgClientHello, tlssynth.ClientHello(ch)), mss),
+			cSeq: 1000,
+			sSeq: 5000,
+		}
+		g.flows++
+	}
+
+	// Open every connection first, so all of them are in flight before any
+	// payload arrives.
+	for _, c := range conns {
+		g.emit(c.cIP, c.sIP, c.sport, 443, c.cSeq, 0, tcpFlags{syn: true}, nil)
+		c.cSeq++
+		g.emit(c.sIP, c.cIP, 443, c.sport, c.sSeq, c.cSeq, tcpFlags{syn: true, ack: true}, nil)
+		c.sSeq++
+		g.emit(c.cIP, c.sIP, c.sport, 443, c.cSeq, c.sSeq, tcpFlags{ack: true}, nil)
+	}
+
+	// Then interleave one segment per connection per round. No FIN: these
+	// connections stay open for the life of the capture.
+	for more := true; more; {
+		more = false
+		for _, c := range conns {
+			if len(c.payload) == 0 {
+				continue
+			}
+			n := min(mss, len(c.payload))
+			g.emit(c.cIP, c.sIP, c.sport, 443, c.cSeq, c.sSeq,
+				tcpFlags{ack: true, psh: n == len(c.payload)}, c.payload[:n])
+			c.cSeq += uint32(n)
+			c.payload = c.payload[n:]
+			more = more || len(c.payload) > 0
+		}
+	}
+
+	fmt.Printf("wrote %s (%d packets, %d concurrent flows)\n", out, g.packets, g.flows)
+}
+
+func writeSample() {
+	out := "testdata/sample.pcap"
+	g, closeFile := newCapture(out)
+	defer closeFile()
 
 	modernCiphers := []uint16{tlsAES128GCMSHA256, tlsAES256GCMSHA384, tlsChaCha20Poly1305,
 		ecdheECDSAAES128GCMSHA25, ecdheRSAAES128GCMSHA256}
