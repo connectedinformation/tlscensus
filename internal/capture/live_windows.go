@@ -634,7 +634,6 @@ func cstring(p *byte) string {
 
 func keepAlive(v any) { runtime.KeepAlive(v) }
 
-
 func windowsInstallHint() string {
 	return `Live capture on Windows needs Npcap.
 
