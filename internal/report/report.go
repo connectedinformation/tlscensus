@@ -130,3 +130,36 @@ func SortRecords(records []*inventory.Record) {
 		return records[i].FirstSeen.Before(records[j].FirstSeen)
 	})
 }
+
+// FlowLine renders one record as a single line, for live capture where the
+// interesting thing is what just happened rather than a distribution.
+func FlowLine(r *inventory.Record) string {
+	sev := ""
+	switch r.MaxSeverity() {
+	case inventory.SevCritical:
+		sev = " !!"
+	case inventory.SevHigh:
+		sev = " !"
+	}
+
+	name := r.ServerName
+	switch {
+	case name == "":
+		name = r.ServerIP.String()
+	case r.ECH:
+		name += " (ech)"
+	}
+
+	version, cipher, group := r.Version, r.CipherSuite, r.Group
+	if !r.ServerObserved {
+		version, cipher, group = r.VersionOffered+" offered", "no response", ""
+	}
+	if group == "" {
+		group = "-"
+	}
+
+	return fmt.Sprintf("%s  %s:%d > %s:%d  %s  %s  %s  %s  [%s]%s",
+		r.FirstSeen.Format("15:04:05"),
+		r.ClientIP, r.ClientPort, r.ServerIP, r.ServerPort,
+		name, version, cipher, group, r.PQ, sev)
+}

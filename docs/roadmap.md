@@ -7,7 +7,7 @@ direction that flatters the tool.
 | | Deliverable | Status | Gate |
 |---|---|---|---|
 | **M1** | Parser, TCP reassembly, capture-file reader, JSON/NDJSON/text output | **done** | Differential-clean against `tshark` on a real corpus — see [validation.md](validation.md) |
-| **M2** | Live capture on Linux and macOS | not started | |
+| **M2** | Live capture on Linux and macOS | **done** | |
 | **M3** | Local web report + CycloneDX CBOM export | not started | |
 | **M4** | Windows capture | not started | **earliest honest public v0.1** |
 | **M5** | QUIC / HTTP-3 | not started | **earliest honest "PQ readiness" headline** |
@@ -29,17 +29,27 @@ check.
 
 ## Notes on the unbuilt parts
 
-**M2 — live capture.** libpcap on macOS and Linux, behind a build tag, with
-the pure-Go file reader remaining the default path so CI never needs
-privileges. Prefer `AF_PACKET` on Linux where it avoids cgo. On macOS,
-opening `pktap` instead of a plain BPF device yields per-process attribution
-for free, which is most of M6 on that platform. Do not run the whole agent
-as root: follow Wireshark's ChmodBPF pattern.
+**M2 — live capture.** Done, and cgo-free on both platforms, which was not
+the original plan. Linux uses `pcapgo.EthernetHandle` (`AF_PACKET`, pure Go);
+macOS talks to `/dev/bpf*` directly through `x/sys/unix` rather than linking
+libpcap. The consequence is that one build runner still produces every
+release target and `go install` needs no C toolchain or libpcap headers.
 
-Two things M1 defers that M2 must handle. The stream table is bounded only
-by an idle timeout, with no cap on concurrent flows — fine for a file, not
-for a busy host. And the reject heuristic needs a byte cap so a long-lived
-non-TLS flow cannot be re-examined indefinitely.
+The kernel BPF filter is hand-assembled and verified by running the real
+program in `x/net/bpf`'s userspace VM against the sample capture, so it is
+tested without root or an interface. IPv6 is accepted wholesale rather than
+tested for `next_header == TCP`, because a filter that checked that byte
+would drop every flow carrying an extension header.
+
+Both M1 deferrals are closed: `MaxStreams` caps concurrently tracked
+connections and reports the shortfall in `Stats.StreamsDropped`, and a stream
+whose prefix fills in both directions without yielding a handshake is
+rejected outright instead of being re-parsed.
+
+Still outstanding on this platform pair: **pktap**. Opening Apple's
+per-process pseudo-device would give process attribution nearly free, but its
+link type is not decoded, so `watch` rejects it with an explicit message
+rather than silently capturing nothing. That is M6.
 
 **M4 — Windows.** Npcap is libpcap-API-compatible, so the capture layer is
 close to a drop-in. **Its licence does not permit redistribution inside a

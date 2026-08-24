@@ -262,3 +262,60 @@ func TestSummaryReadiness(t *testing.T) {
 		t.Errorf("PQReadiness = %v, want %v", s.PQReadiness, want)
 	}
 }
+
+// The stream cap is what stops a busy host from multiplying the per-stream
+// prefix by an unbounded factor. When it bites, the shortfall must be
+// visible in Stats rather than silently absorbed — an inventory that
+// quietly stops counting is the failure this tool exists to avoid.
+func TestMaxStreamsIsEnforcedAndReported(t *testing.T) {
+	var records []*inventory.Record
+	asm := assemble.New(func(f *assemble.Flow) {
+		records = append(records, inventory.Analyze(f))
+	}, assemble.Options{MaxStreams: 3})
+
+	src, err := capture.OpenFile(samplePcap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+	for {
+		data, ci, err := src.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		asm.Packet(data, ci, src.LinkType())
+	}
+	asm.Close()
+
+	stats := asm.Stats()
+	if stats.StreamsDropped == 0 {
+		t.Fatal("StreamsDropped = 0 with MaxStreams=3 over 11 streams")
+	}
+	if int64(len(records)) > 3 {
+		t.Errorf("emitted %d flows, want at most the 3-stream cap", len(records))
+	}
+	if stats.Streams != 11 {
+		t.Errorf("Streams = %d, want 11 — dropped streams must still be counted", stats.Streams)
+	}
+	// Every stream in the sample capture closes cleanly, so the live count
+	// must unwind to zero. A leak here would be invisible until a long run
+	// exhausted the cap and stopped reporting anything.
+	if stats.LiveStreams != 0 {
+		t.Errorf("LiveStreams = %d after close, want 0", stats.LiveStreams)
+	}
+}
+
+// Without a cap the sample capture must be fully reported, and the live
+// count must still unwind.
+func TestLiveStreamAccountingUnwinds(t *testing.T) {
+	_, stats := readSample(t)
+	if stats.LiveStreams != 0 {
+		t.Errorf("LiveStreams = %d after close, want 0", stats.LiveStreams)
+	}
+	if stats.StreamsDropped != 0 {
+		t.Errorf("StreamsDropped = %d at the default cap, want 0", stats.StreamsDropped)
+	}
+}

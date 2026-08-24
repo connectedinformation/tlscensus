@@ -33,7 +33,7 @@ FINDINGS
 
 ## Status
 
-**Early. M1 reads capture files; live capture is not implemented yet.**
+**Early. Reads capture files and captures live on Linux and macOS.**
 See [docs/roadmap.md](docs/roadmap.md) for what lands when, and
 [docs/validation.md](docs/validation.md) for what has not yet been checked
 against a reference implementation.
@@ -47,14 +47,25 @@ go install github.com/tlscensus/tlscensus/cmd/tlscensus@latest
 ## Use
 
 ```sh
+# Offline
 tlscensus read capture.pcap
 tlscensus read -o ndjson capture.pcapng | jq 'select(.pq_status == "classical")'
 tlscensus read -o json -records *.pcap > inventory.json
+
+# Live (Linux, macOS)
+tlscensus interfaces
+sudo tlscensus watch -i en0
+sudo tlscensus watch -o ndjson | tee handshakes.ndjson
 ```
 
-Reading a capture needs no privileges and no libpcap: the file path is pure
-Go. That also means the whole pipeline runs in CI, which is why it is tested
-the way it is.
+**No cgo, anywhere.** Linux capture is `AF_PACKET`; macOS reads `/dev/bpf*`
+directly. There is no libpcap dependency, so `go install` works with no C
+toolchain and one build runner produces every release target.
+
+Reading a capture file needs no privileges at all, which is also why the
+entire pipeline is exercised in CI. Live capture needs `CAP_NET_RAW` on Linux
+or BPF device access on macOS — see [docs/permissions.md](docs/permissions.md)
+for how to grant the narrow capability instead of running as root.
 
 ## What it gets right
 
@@ -103,7 +114,10 @@ than no inventory.
   TLS 1.3 traffic rides on QUIC, and it skews post-quantum. Until M5 lands,
   the readiness figure is biased *downward* on any network carrying HTTP/3.
 - **No process attribution yet** (M6). Flows are identified by address and
-  port, not by the application that opened them.
+  port, not by the application that opened them. On macOS the `pktap`
+  pseudo-device would provide this nearly free; its link type is not decoded
+  yet, so `watch` refuses it explicitly rather than capturing nothing.
+- **Windows live capture** is not implemented (M4). `read` works there today.
 - **STARTTLS is not tracked.** A session that begins as cleartext SMTP or
   IMAP and upgrades in place is not currently detected.
 - **Resumed sessions** carry no full handshake, so they report what the

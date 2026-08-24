@@ -43,6 +43,16 @@ const (
 	// concluding it is not TLS. One TLS record header is five bytes; a
 	// little more avoids rejecting a flow on a tiny first segment.
 	minBytesBeforeReject = 16
+
+	// DefaultMaxStreams caps concurrently tracked connections.
+	//
+	// M1 bounded memory per stream but not the number of streams, which is
+	// fine for a capture file and not fine for a live host: a SYN flood, a
+	// port scan, or simply a busy server multiplies the per-stream prefix
+	// by an unbounded factor. At this cap the worst case is roughly
+	// MaxStreams * MaxStreamPrefix * 2, so 64Ki * 32KiB * 2 would be far
+	// too much — hence a cap chosen for an endpoint, not a tap.
+	DefaultMaxStreams = 8192
 )
 
 // Flow is one observed TCP connection and whatever of its TLS handshake was
@@ -71,6 +81,9 @@ type Handler func(*Flow)
 type Options struct {
 	MaxStreamPrefix int
 	CloseTimeout    time.Duration
+	// MaxStreams caps concurrently tracked connections. Beyond it, new
+	// connections are counted and ignored rather than tracked.
+	MaxStreams int
 }
 
 func (o *Options) setDefaults() {
@@ -79,6 +92,9 @@ func (o *Options) setDefaults() {
 	}
 	if o.CloseTimeout <= 0 {
 		o.CloseTimeout = DefaultCloseTimeout
+	}
+	if o.MaxStreams <= 0 {
+		o.MaxStreams = DefaultMaxStreams
 	}
 }
 
@@ -90,6 +106,12 @@ type Stats struct {
 	Streams     int64
 	TLSFlows    int64
 	RejectedTCP int64
+	// StreamsDropped counts connections ignored because MaxStreams was
+	// already reached. A non-zero value means the inventory is incomplete,
+	// so it is reported rather than silently absorbed.
+	StreamsDropped int64
+	// LiveStreams is the number currently tracked.
+	LiveStreams int64
 }
 
 // Assembler feeds packets through TCP reassembly and reports TLS flows.
@@ -154,6 +176,16 @@ func (a *Assembler) Packet(data []byte, ci gopacket.CaptureInfo, linkType layers
 	}
 }
 
+// FlushOlderThan closes streams idle since before t, emitting whatever they
+// yielded.
+//
+// Live capture needs this on a timer rather than on packet arrival: a flow
+// that completes on a quiet interface would otherwise sit unreported until
+// the next packet from anyone, which on an idle host can be minutes.
+func (a *Assembler) FlushOlderThan(t time.Time) {
+	a.asm.FlushCloseOlderThan(t)
+}
+
 // Close flushes every remaining stream, emitting partial handshakes.
 func (a *Assembler) Close() {
 	a.asm.FlushAll()
@@ -174,8 +206,21 @@ func (f *factory) New(netFlow, tcpFlow gopacket.Flow, tcp *layers.TCP, ac reasse
 	ts := ac.GetCaptureInfo().Timestamp
 	src, dst := netFlow.Endpoints()
 	sport, dport := tcpFlow.Endpoints()
+
+	// Over the cap, the connection is acknowledged but nothing is retained
+	// for it. The alternative — evicting an existing stream — would drop a
+	// handshake already half-read in favour of one that may never be TLS.
+	over := f.a.stats.LiveStreams >= int64(f.a.opts.MaxStreams)
+	if over {
+		f.a.stats.StreamsDropped++
+	} else {
+		f.a.stats.LiveStreams++
+	}
+
 	return &stream{
-		a: f.a,
+		a:        f.a,
+		rejected: over,
+		counted:  !over,
 		flow: &Flow{
 			ClientIP:   addrOf(src),
 			ServerIP:   addrOf(dst),
@@ -199,6 +244,9 @@ type stream struct {
 	haveCH, haveSH bool
 	rejected       bool
 	emitted        bool
+	// counted records whether this stream incremented LiveStreams, so the
+	// decrement on completion stays balanced.
+	counted bool
 }
 
 func (s *stream) Accept(tcp *layers.TCP, ci gopacket.CaptureInfo, dir reassembly.TCPFlowDirection,
@@ -267,6 +315,15 @@ func (s *stream) parse() {
 	if s.haveCH {
 		return
 	}
+
+	// Both directions filled the prefix without yielding a handshake. This
+	// is the hard upper bound: whatever this flow is, no further bytes will
+	// make it parse, so stop retaining and re-parsing them.
+	if s.full[0] && s.full[1] {
+		s.reject()
+		return
+	}
+
 	// Neither direction looks like a handshake once enough bytes have
 	// arrived to tell. Drop the buffers; this is what makes scanning every
 	// port affordable.
@@ -278,6 +335,10 @@ func (s *stream) parse() {
 			return
 		}
 	}
+	s.reject()
+}
+
+func (s *stream) reject() {
 	s.rejected = true
 	s.buf[0], s.buf[1] = nil, nil
 	s.a.stats.RejectedTCP++
@@ -285,6 +346,10 @@ func (s *stream) parse() {
 
 func (s *stream) ReassemblyComplete(ac reassembly.AssemblerContext) bool {
 	s.emit()
+	if s.counted {
+		s.counted = false
+		s.a.stats.LiveStreams--
+	}
 	return true
 }
 
