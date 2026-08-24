@@ -8,10 +8,58 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 )
 
-// version is set at build time with -ldflags "-X main.version=...".
-var version = "dev"
+// version is set at build time with -ldflags "-X main.version=..." for
+// release builds. It is empty otherwise, and resolved from the build info
+// the toolchain embeds.
+var version = ""
+
+func init() {
+	if version == "" {
+		version = resolveVersion()
+	}
+}
+
+// resolveVersion recovers a useful version for a binary built without
+// release ldflags.
+//
+// `go install github.com/tlscensus/tlscensus/cmd/tlscensus@v0.1.0` applies
+// no ldflags, so without this every such build reports "dev" — and a bug
+// report saying "tlscensus dev" identifies nothing. The module version is
+// embedded by the toolchain and says exactly what was installed; a build
+// straight from a checkout falls back to the commit, marked dirty when the
+// tree had uncommitted changes.
+func resolveVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "dev"
+	}
+	if v := info.Main.Version; v != "" && v != "(devel)" {
+		return v
+	}
+	var revision string
+	var modified bool
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			revision = s.Value
+		case "vcs.modified":
+			modified = s.Value == "true"
+		}
+	}
+	if revision == "" {
+		return "dev"
+	}
+	if len(revision) > 12 {
+		revision = revision[:12]
+	}
+	if modified {
+		return "dev-" + revision + "-dirty"
+	}
+	return "dev-" + revision
+}
 
 const usage = `tlscensus — passive TLS cryptography inventory
 
