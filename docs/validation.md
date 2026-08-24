@@ -142,34 +142,92 @@ about the output looks non-deterministic (defect 4).
 
 ## Not yet validated
 
-### JA4 / JA4S — provisional
+### JA4 — validated; JA4S — not
 
-`internal/tlsparse/ja4.go` implements the published FoxIO specification, but
-its output **has not been diffed against the reference implementation**. A
-fingerprint that does not match everyone else's is worse than no fingerprint,
-since it looks usable and correlates with nothing.
+`internal/tlsparse/ja4.go` now agrees with Wireshark's JA4 implementation on
+**47 of 47 handshakes**: 21 synthetic and 26 captured from four TLS stacks
+(OpenSSL 3.6, LibreSSL, curl/SecureTransport, and three browsers). The
+corpus covers TLS 1.2 and 1.3, present and absent SNI — including the `i`
+branch that a connection without SNI takes — several ALPN values, narrow
+signature-algorithm lists, and post-quantum key shares.
 
-Two known incomplete details, marked at their sites in the source:
+Two details remain unexercised and are marked in the source:
 
-- The spec substitutes a hex encoding when the first or last byte of an ALPN
-  value is not alphanumeric. Not implemented; such values pass through
-  unchanged.
-- DTLS should use the `d` protocol character. The record layer does not
-  decode DTLS at all yet.
+- an ALPN value whose first or last byte is not alphanumeric, where the
+  spec substitutes a hex encoding. No client in the corpus sent one.
+- DTLS, which the record layer does not decode at all.
 
-**To close this:** run both implementations over a shared pcap corpus and
-record the diff here.
+**JA4S is not validated.** Wireshark emits `tls.handshake.ja4` for the
+client but the harness does not yet compare a server fingerprint, so the
+JA4S code has been read against the spec and nothing more.
 
-### Differential testing against tshark — not started
+### Differential testing against tshark — done, with gaps
 
-The intended M1 gate. `tshark -T ek` extracts nearly the same field set from
-the same bytes and is heavily battle-tested; a disagreement is almost always
-a bug here. Zeek's `ssl.log` is a useful second opinion.
+The M1 gate. Run it with:
 
-This wants a corpus of real handshakes — captured locally, never committed —
-covering at minimum: a post-quantum handshake, HelloRetryRequest, session
-resumption, ECH, a TLS 1.2 chain with multiple intermediates, and a
-non-browser client such as curl, OpenSSL `s_client` and a Java runtime.
+```sh
+sudo scripts/capture-corpus.sh      # captures into testdata/local/, gitignored
+scripts/differential.sh testdata/*.pcap testdata/local/*.pcap
+```
+
+Current result — **47 flows, 282 field checks, 0 mismatches**, comparing
+SNI, cipher suites, supported groups, key share groups, signature algorithms,
+ALPN and JA4 against Wireshark 4.6.8.
+
+Two rules make the comparison mean something:
+
+- **Codepoints, never names.** Mapping tshark's `4865` through this
+  project's own registry to `TLS_AES_128_GCM_SHA256` would make the oracle
+  agree with the code under test by construction. GREASE is stripped from
+  the tshark side by a predicate written out from RFC 8701 in
+  `scripts/diffparse`, not imported from `internal/tlsparse`, for the same
+  reason.
+- **A ClientHello tshark decodes and tlscensus does not is reported as
+  MISSING**, not skipped. Silent under-reporting is the failure mode that
+  matters most here.
+
+#### What the first run actually found
+
+Two mismatches, and **both were the harness, not the parser**:
+
+1. `signature_algorithms` disagreed on a Chrome ClientHello.
+   `tls.handshake.sig_hash_alg` is emitted by `signature_algorithms` (13),
+   `signature_algorithms_cert` (50) and `delegated_credentials` (34) alike,
+   and `-e` returns their concatenation. Chrome carries 13 and 34, so the
+   oracle was comparing a union against one extension. Fixed by reading that
+   field from the full dissection tree, scoped to extension 13.
+2. `key_share_groups` disagreed on order, non-deterministically. Each
+   KeyShareEntry is its own object in tshark's tree, and the walk visited
+   siblings in Go's randomised map order. `tshark -V` confirmed the wire
+   order is the one tlscensus reports. Fixed by taking order-sensitive
+   fields from `-e`, which preserves it, and using the tree only where a
+   field name is ambiguous.
+
+Worth recording because the pattern is now familiar: an oracle that is
+wrong in a way that accuses correct code is not much better than one that
+agrees with broken code.
+
+#### Corpus coverage
+
+| Shape | Covered |
+|---|---|
+| TLS 1.3 | yes, 23 flows |
+| TLS 1.2 | yes, 3 flows |
+| Post-quantum key share (X25519MLKEM768) | yes, 16 flows |
+| No SNI (JA4 `i` branch) | yes, 1 flow |
+| PSK / session resumption offered | yes, 1 flow |
+| Distinct client fingerprints | 15 JA4 values |
+| **HelloRetryRequest** | **no** |
+| **ECH** | **no** (synthetic only) |
+| **Non-alphanumeric ALPN** | **no** |
+| **DTLS, QUIC** | **no** (not implemented) |
+
+HelloRetryRequest is the significant gap. `openssl s_client -groups
+P-521:x25519` was meant to provoke one but OpenSSL sends key shares for
+both groups, so no retry was needed. Forcing it needs a server that refuses
+every offered group, or a client that key-shares only a group the server
+will not take. The HRR path is covered synthetically and by unit tests, but
+never against a real server.
 
 ### Registry completeness — partial
 
