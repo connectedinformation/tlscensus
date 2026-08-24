@@ -117,11 +117,51 @@ same capture and agrees on every field.
 Not covered: connection migration, Retry (which re-keys on a new connection
 ID and is detected but not followed), and 0-RTT.
 
-**M6 — process attribution.** macOS gets it nearly free via PKTAP. Linux
-wants eBPF on `tcp_connect` rather than polling `/proc`, and Windows wants
-ETW `Microsoft-Windows-Kernel-Network`, for the same reason in both cases:
-polling a socket table races short-lived connections, which are the ones
-worth catching.
+**M6 — process attribution.** Linking a handshake to the application that
+made it. The README promises this in its opening sentence and does not yet
+deliver it: a finding of "this host does classical key exchange" cannot be
+acted on, where "this runtime does" is a ticket.
+
+Deliberately **not** starting with eBPF, despite it being the obvious answer.
+
+*Staging.* macOS `pktap` first: packets arrive already carrying pid and
+process name, so it is mostly a `DLT_PKTAP` header decoder — capture
+currently refuses that link type explicitly rather than capturing nothing.
+Then a socket-table lookup **at flow-emit time** on Linux and Windows —
+`/proc/net/tcp` plus `/proc/*/fd`, and `GetExtendedTcpTable` — which needs no
+privilege beyond what capture already holds and is roughly a day per
+platform. eBPF only afterwards, and only if a measured miss rate justifies
+it.
+
+*Why not eBPF first.* It raises the privilege requirement from `CAP_NET_RAW`
+to `CAP_BPF` + `CAP_PERFMON`, needs BTF, is forbidden outright in some
+hardened environments — the same environments a compliance-driven inventory
+gets deployed into — and adds an LLVM toolchain to the contributor
+requirements of a project whose build is currently `go build` and nothing
+else. The platform with the cleanest install story today would take the
+biggest hit. A socket-table lookup races short-lived connections and will
+miss some; the honest response is to report the attribution rate
+(`attributed: 340/412`) so the gap is visible, and to let measurement decide
+whether eBPF is worth its cost.
+
+*The rule.* Attribution is **strictly additive**. If it is unavailable the
+tool behaves exactly as it does without it, and `watch` never fails because
+an attribution backend did not load. A row with no process must be
+distinguishable from a row that was never attributed, or the output becomes
+quietly incomplete in the way this project keeps having to fix.
+
+*What it costs beyond code.* Attribution is worth less than it sounds on
+servers (one process), behind proxies (every flow attributes to the proxy),
+in containers (a pid from another namespace means nothing without cgroup
+mapping) and for browsers (`Google Chrome Helper`, not the site). Its value
+is highest on developer and employee endpoints — which is also where adding
+"which application, run by which user" turns a crypto inventory into
+something much closer to endpoint monitoring. That is a deployment cost, not
+a technical one: it changes who has to approve running it, and the privacy
+section needs rewriting rather than footnoting when it lands.
+
+*Sequencing.* M6 was never a release gate and is the only milestone that is
+not. v0.1 ships first.
 
 ## Deliberately out of scope
 
