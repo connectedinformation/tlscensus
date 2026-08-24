@@ -57,10 +57,19 @@ jobs:
       # The generator mints fresh RSA keys each run, so the bytes are not
       # byte-reproducible. What must hold is that a capture rebuilt from the
       # current generator still yields the inventory the tests assert.
-      - name: regenerated capture still matches the end-to-end expectations
+      # Guard against .gitignore swallowing a generated capture. This job
+      # regenerates them, so it would otherwise pass while the test jobs
+      # fail on a file that was never committed.
+      - name: generated captures are tracked
         run: |
           go run ./testdata/gen
-          go test ./internal/assemble/
+          untracked=$(git ls-files --others --exclude-standard --ignored testdata/ || true)
+          if [ -n "$untracked" ]; then
+            echo "::error::generated capture(s) not committed:"; echo "$untracked"; exit 1
+          fi
+          git ls-files --error-unmatch testdata/sample.pcap testdata/concurrent.pcap >/dev/null
+      - name: regenerated captures still match the end-to-end expectations
+        run: go test ./internal/assemble/
 
   fuzz:
     runs-on: ubuntu-latest

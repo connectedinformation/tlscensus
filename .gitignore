@@ -14,8 +14,14 @@
 # Local captures. Never commit real traffic: a capture of a live network is
 # a record of who talked to whom, which is the exact data this tool exists
 # to treat carefully.
+#
+# Everything under testdata/ is synthesised by `go run ./testdata/gen` and is
+# committed. The exception is a directory pattern rather than a list of
+# filenames on purpose: naming them individually means the next generated
+# capture is silently dropped by `git add`, which is exactly how
+# concurrent.pcap reached CI as a missing file.
 *.pcap
 *.pcapng
-!testdata/sample.pcap
+!testdata/*.pcap
 
 .DS_Store
