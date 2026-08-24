@@ -5,11 +5,12 @@ package capture
 import (
 	"errors"
 	"fmt"
-	"os"
+	"net"
 
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcapgo"
+	"golang.org/x/sys/unix"
 )
 
 // Linux capture uses pcapgo's AF_PACKET handle, which is pure Go. That keeps
@@ -39,7 +40,7 @@ func OpenLive(iface string, opts LiveOptions) (Source, error) {
 
 	h, err := pcapgo.NewEthernetHandle(iface)
 	if err != nil {
-		if errors.Is(err, os.ErrPermission) {
+		if permissionDenied(iface) {
 			return nil, &PermissionError{Op: "open AF_PACKET socket", Err: err, Hint: linuxPermissionHint()}
 		}
 		return nil, fmt.Errorf("capturing on %s: %w", iface, err)
@@ -85,6 +86,30 @@ func (s *linuxSource) Name() string              { return s.iface }
 func (s *linuxSource) Close() error {
 	s.h.Close()
 	return nil
+}
+
+// permissionDenied reports whether OpenLive failed for lack of CAP_NET_RAW.
+//
+// It cannot be answered from the error pcapgo returns. NewEthernetHandle
+// formats the errno with %s rather than %w, so the syscall error is not in
+// the chain and errors.Is(err, os.ErrPermission) is always false — which
+// silently cost every unprivileged user the hint below, the single most
+// common first experience of this tool. The darwin path opens its BPF device
+// itself and checks unix.EPERM directly; here the only way to learn the same
+// thing is to make the failing syscall again and read its errno.
+//
+// A missing interface is not a permission problem, and unprivileged callers
+// hit EPERM whatever they name, so the interface is checked first.
+func permissionDenied(iface string) bool {
+	if _, err := net.InterfaceByName(iface); err != nil {
+		return false
+	}
+	fd, err := unix.Socket(unix.AF_PACKET, unix.SOCK_RAW|unix.SOCK_CLOEXEC, 0)
+	if err != nil {
+		return errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES)
+	}
+	unix.Close(fd)
+	return false
 }
 
 func linuxPermissionHint() string {

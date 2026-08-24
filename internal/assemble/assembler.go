@@ -53,6 +53,31 @@ const (
 	// MaxStreams * MaxStreamPrefix * 2, so 64Ki * 32KiB * 2 would be far
 	// too much — hence a cap chosen for an endpoint, not a tap.
 	DefaultMaxStreams = 8192
+
+	// pageBytes mirrors the page size in gopacket's reassembly package,
+	// which does not export it. Only used to size the caps below, so an
+	// upstream change costs accuracy, not correctness.
+	pageBytes = 1900
+
+	// maxBufferedPagesTotal bounds out-of-order queueing across every
+	// connection, at roughly 8 MiB of payload.
+	//
+	// gopacket holds a segment that arrives ahead of a gap until the gap
+	// is filled, and DefaultAssemblerOptions leaves that unlimited. Offline
+	// the gap is always filled or the file ends; live it need not be. A
+	// kernel buffer overrun drops a segment the receiver already acked, so
+	// it is never retransmitted and the capture-side gap is permanent —
+	// every later segment of that connection then queues until the idle
+	// sweep, which at line rate is gigabytes for a single flow, and it
+	// happens to flows that were ruled out as non-TLS long before.
+	//
+	// Capping loses nothing: on overflow reassembly delivers what it holds
+	// and skips the gap, which ReassembledSG already handles.
+	maxBufferedPagesTotal = 4096
+
+	// minBufferedPagesPerConn floors the per-connection cap, which is
+	// otherwise derived from MaxStreamPrefix.
+	minBufferedPagesPerConn = 8
 )
 
 // Flow is one observed TCP connection and whatever of its TLS handshake was
@@ -132,6 +157,17 @@ func New(h Handler, opts Options) *Assembler {
 	opts.setDefaults()
 	a := &Assembler{handler: h, opts: opts}
 	a.asm = reassembly.NewAssembler(reassembly.NewStreamPool(&factory{a: a}))
+
+	// The per-connection cap applies per direction, and payload past the
+	// prefix is discarded on arrival, so the prefix is the natural size for
+	// it. See maxBufferedPagesTotal for why the defaults are unusable live.
+	perConn := opts.MaxStreamPrefix/pageBytes + 2
+	if perConn < minBufferedPagesPerConn {
+		perConn = minBufferedPagesPerConn
+	}
+	a.asm.MaxBufferedPagesPerConnection = perConn
+	a.asm.MaxBufferedPagesTotal = maxBufferedPagesTotal
+
 	return a
 }
 
@@ -202,6 +238,21 @@ func (c *context) GetCaptureInfo() gopacket.CaptureInfo { return c.ci }
 type factory struct{ a *Assembler }
 
 func (f *factory) New(netFlow, tcpFlow gopacket.Flow, tcp *layers.TCP, ac reassembly.AssemblerContext) reassembly.Stream {
+	// Decline a payload-free packet that is not a SYN.
+	//
+	// Now that connections complete on FIN, the pool removes them on the
+	// second FIN — and the final ACK of the four-way close arrives after
+	// that, for a connection that no longer exists. Registering a stream
+	// for it creates a phantom that never completes, inflating Streams and
+	// holding a MaxStreams slot until the idle sweep minutes later.
+	// Returning nil is how reassembly is told not to track a connection.
+	//
+	// A connection whose SYN was missed is unaffected: it is registered by
+	// the first packet that carries payload.
+	if tcp != nil && !tcp.SYN && len(tcp.Payload) == 0 {
+		return nil
+	}
+
 	f.a.stats.Streams++
 	ts := ac.GetCaptureInfo().Timestamp
 	src, dst := netFlow.Endpoints()

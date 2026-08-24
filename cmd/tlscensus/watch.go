@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -93,8 +94,10 @@ func runWatch(args []string) error {
 		fmt.Fprintln(os.Stderr, " — press Ctrl-C to stop")
 	}
 
-	// Sweep idle streams on a timer, guarded by the same lock so a flush
-	// cannot emit a record while the final report is being built.
+	// Sweep idle streams on a timer. The sweep is serialised against the
+	// capture goroutine inside the pipeline, which also defers delivery
+	// until it has released the assembler lock — so the writers below can
+	// take mu without deadlocking against the flush that produced them.
 	stopFlush := make(chan struct{})
 	var flushWG sync.WaitGroup
 	flushWG.Add(1)
@@ -107,30 +110,39 @@ func runWatch(args []string) error {
 			case <-stopFlush:
 				return
 			case now := <-t.C:
-				mu.Lock()
-				p.asm.FlushOlderThan(now.Add(-assemble.DefaultCloseTimeout))
-				mu.Unlock()
+				p.flushOlderThan(now.Add(-assemble.DefaultCloseTimeout))
 			}
 		}
 	}()
 
+	// stopping distinguishes the read error caused by our own shutdown from
+	// a genuine capture failure. Closing the source is how the blocking read
+	// is unblocked, so run always returns "use of closed file" on Ctrl-C —
+	// reporting that as an error would end every successful capture with a
+	// failure message and a non-zero exit.
+	var stopping atomic.Bool
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sig
+		stopping.Store(true)
 		// Closing the source unblocks the capture read; run then returns.
 		src.Close()
 	}()
 
 	runErr := p.run(src)
+	if stopping.Load() {
+		runErr = nil
+	}
 
 	close(stopFlush)
 	flushWG.Wait()
 	signal.Stop(sig)
 
-	mu.Lock()
+	// The capture loop has returned and the sweeper has stopped, so this
+	// is the only goroutine left; finish streams any remaining flows
+	// through onRecord before the summary is built.
 	rep := p.finish([]string{src.Name()}, *top, false)
-	mu.Unlock()
 
 	warnIfIncomplete(rep.Stats)
 

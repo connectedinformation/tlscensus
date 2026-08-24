@@ -63,11 +63,15 @@ jobs:
       - name: generated captures are tracked
         run: |
           go run ./testdata/gen
-          untracked=$(git ls-files --others --exclude-standard --ignored testdata/ || true)
+          # Deliberately without --exclude-standard: a capture is missing
+          # whether .gitignore swallowed it or the author forgot to add it,
+          # and --exclude-standard hides exactly the first case. Listing the
+          # filenames instead is the pattern .gitignore rejects, for the
+          # reason recorded there.
+          untracked=$(git ls-files --others testdata/ | grep -E '\.pcap(ng)?$' || true)
           if [ -n "$untracked" ]; then
             echo "::error::generated capture(s) not committed:"; echo "$untracked"; exit 1
           fi
-          git ls-files --error-unmatch testdata/sample.pcap testdata/concurrent.pcap >/dev/null
       - name: regenerated captures still match the end-to-end expectations
         run: go test ./internal/assemble/
 

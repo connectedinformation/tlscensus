@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
+
+	"github.com/gopacket/gopacket"
+	"github.com/gopacket/gopacket/layers"
 
 	"github.com/tlscensus/tlscensus/internal/assemble"
 	"github.com/tlscensus/tlscensus/internal/capture"
@@ -18,9 +22,24 @@ import (
 // only difference between offline and live analysis is where packets come
 // from — the parsing, reassembly and judgement are identical.
 type pipeline struct {
+	// mu guards the assembler and everything the handler touches.
+	//
+	// assemble.Assembler is explicitly not safe for concurrent use, and
+	// live capture drives it from two goroutines: the capture loop calls
+	// packet, while a ticker calls flushOlderThan. Every entry point below
+	// takes mu so those two serialise against each other.
+	mu      sync.Mutex
 	asm     *assemble.Assembler
 	acc     *inventory.Accumulator
 	records []*inventory.Record
+
+	// pending holds records emitted by the assembler call in progress.
+	// The handler runs deep inside that call with mu held, so it cannot
+	// deliver to onRecord itself: watch's writer takes its own output
+	// lock, and a flush that already held that lock would deadlock
+	// against it. Records are queued here and handed out by deliver once
+	// mu is released.
+	pending []*inventory.Record
 
 	// onRecord, when set, is called as each flow completes. Live capture
 	// uses it to stream; offline analysis collects and sorts instead.
@@ -32,16 +51,51 @@ type pipeline struct {
 func newPipeline(opts assemble.Options, keep bool, onRecord func(*inventory.Record)) *pipeline {
 	p := &pipeline{acc: inventory.NewAccumulator(), keep: keep, onRecord: onRecord}
 	p.asm = assemble.New(func(f *assemble.Flow) {
+		// Runs with mu held; see the pending field.
 		rec := inventory.Analyze(f)
 		p.acc.Add(rec)
-		if p.onRecord != nil {
-			p.onRecord(rec)
-		}
 		if p.keep {
 			p.records = append(p.records, rec)
 		}
+		if p.onRecord != nil {
+			p.pending = append(p.pending, rec)
+		}
 	}, opts)
 	return p
+}
+
+// takePending removes and returns the records queued by the assembler call
+// in progress. It must be called with mu held.
+func (p *pipeline) takePending() []*inventory.Record {
+	recs := p.pending
+	p.pending = nil
+	return recs
+}
+
+// deliver streams records to onRecord. It must be called with mu released,
+// so the writer is free to take its own output lock.
+func (p *pipeline) deliver(recs []*inventory.Record) {
+	for _, rec := range recs {
+		p.onRecord(rec)
+	}
+}
+
+// packet feeds one captured packet through reassembly.
+func (p *pipeline) packet(data []byte, ci gopacket.CaptureInfo, linkType layers.LinkType) {
+	p.mu.Lock()
+	p.asm.Packet(data, ci, linkType)
+	recs := p.takePending()
+	p.mu.Unlock()
+	p.deliver(recs)
+}
+
+// flushOlderThan sweeps streams idle since t, reporting whatever they hold.
+func (p *pipeline) flushOlderThan(t time.Time) {
+	p.mu.Lock()
+	p.asm.FlushOlderThan(t)
+	recs := p.takePending()
+	p.mu.Unlock()
+	p.deliver(recs)
 }
 
 // run pumps every packet from src through the assembler.
@@ -55,19 +109,29 @@ func (p *pipeline) run(src capture.Source) error {
 			}
 			return err
 		}
-		p.asm.Packet(data, ci, linkType)
+		p.packet(data, ci, linkType)
 	}
 }
 
 func (p *pipeline) finish(sources []string, top int, withRecords bool) *report.Report {
+	p.mu.Lock()
 	p.asm.Close()
+	recs := p.takePending()
+	stats := p.asm.Stats()
+	p.mu.Unlock()
+
+	// Stream the last flows before the summary, not during it.
+	p.deliver(recs)
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	report.SortRecords(p.records)
 	rep := &report.Report{
 		Tool:        "tlscensus",
 		Version:     version,
 		GeneratedAt: time.Now().UTC(),
 		Sources:     sources,
-		Stats:       p.asm.Stats(),
+		Stats:       stats,
 		Summary:     p.acc.Summary(top),
 	}
 	if withRecords {

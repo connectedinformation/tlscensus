@@ -24,4 +24,11 @@
 *.pcapng
 !testdata/*.pcap
 
+# The negation above re-includes every capture sitting directly in
+# testdata/, which is fine for generated ones and dangerous for anything
+# else: a real capture dropped there to reproduce a bug would be staged by
+# `git add -A` with no warning. Put those here instead — this directory is
+# ignored, negation and all.
+testdata/local/
+
 .DS_Store
