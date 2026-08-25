@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tlscensus/tlscensus/internal/inventory"
-	"github.com/tlscensus/tlscensus/internal/tlsparse"
+	"github.com/connectedinformation/tlscensus/internal/inventory"
+	"github.com/connectedinformation/tlscensus/internal/tlsparse"
 )
 
 // CycloneDX 1.6 cryptographic bill of materials.

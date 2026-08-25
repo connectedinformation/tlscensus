@@ -15,8 +15,8 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/tlscensus/tlscensus/internal/assemble"
-	"github.com/tlscensus/tlscensus/internal/tlsparse"
+	"github.com/connectedinformation/tlscensus/internal/assemble"
+	"github.com/connectedinformation/tlscensus/internal/tlsparse"
 )
 
 // PQStatus is the post-quantum readiness of a single handshake.

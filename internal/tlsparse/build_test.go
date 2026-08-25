@@ -1,6 +1,6 @@
 package tlsparse
 
-import "github.com/tlscensus/tlscensus/internal/tlssynth"
+import "github.com/connectedinformation/tlscensus/internal/tlssynth"
 
 // Thin adapters over tlssynth, which owns the synthetic-handshake builders.
 // It defines its own codepoint constants rather than importing this package,

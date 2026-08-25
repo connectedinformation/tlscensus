@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/tlscensus/tlscensus/internal/assemble"
-	"github.com/tlscensus/tlscensus/internal/capture"
+	"github.com/connectedinformation/tlscensus/internal/assemble"
+	"github.com/connectedinformation/tlscensus/internal/capture"
 )
 
 func runRead(args []string) error {

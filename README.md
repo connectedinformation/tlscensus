@@ -73,8 +73,8 @@ clears it.
 **Any platform — verified download**
 
 ```sh
-curl -fsSLO https://github.com/tlscensus/tlscensus/releases/latest/download/checksums.txt
-curl -fsSLO https://github.com/tlscensus/tlscensus/releases/latest/download/tlscensus_Linux_x86_64.tar.gz
+curl -fsSLO https://github.com/connectedinformation/tlscensus/releases/latest/download/checksums.txt
+curl -fsSLO https://github.com/connectedinformation/tlscensus/releases/latest/download/tlscensus_Linux_x86_64.tar.gz
 sha256sum --ignore-missing -c checksums.txt
 tar xzf tlscensus_*.tar.gz && sudo install tlscensus /usr/local/bin/
 ```
@@ -94,7 +94,7 @@ step done yourself.
 **From source**
 
 ```sh
-go install github.com/tlscensus/tlscensus/cmd/tlscensus@latest
+go install github.com/connectedinformation/tlscensus/cmd/tlscensus@latest
 ```
 
 ## Use
@@ -222,10 +222,24 @@ sends nothing anywhere. Output goes to the file or pipe you point it at.
 Nothing in this repository phones home; `grep -r 'http'` over the source is
 a short read.
 
+## Who makes this
+
+tlscensus is built and maintained by **Connected Information**, which also
+makes commercial TLS tooling. It is open source because a tool that runs as
+root and reads every hostname a machine contacts should be one you can audit
+before you trust it — and because the reports that make it correct come from
+people running it on networks we do not have.
+
+It has no telemetry, makes no network connections of its own, and is
+Apache-2.0 licensed. Those are checkable claims, not assurances.
+
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Contributions are accepted under the
-[DCO](https://developercertificate.org/) — sign commits with `git commit -s`.
+**A bug report from your own network is worth more to this project than a
+pull request.** Nearly every real defect it has had was found by someone
+running it against real hardware, after a green CI run — see
+[docs/validation.md](docs/validation.md). Details in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

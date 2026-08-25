@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tlscensus/tlscensus/internal/assemble"
-	"github.com/tlscensus/tlscensus/internal/capture"
-	"github.com/tlscensus/tlscensus/internal/inventory"
-	"github.com/tlscensus/tlscensus/internal/report"
+	"github.com/connectedinformation/tlscensus/internal/assemble"
+	"github.com/connectedinformation/tlscensus/internal/capture"
+	"github.com/connectedinformation/tlscensus/internal/inventory"
+	"github.com/connectedinformation/tlscensus/internal/report"
 )
 
 func sampleReport(t *testing.T) (*report.Report, []*inventory.Record) {

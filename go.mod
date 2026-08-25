@@ -1,4 +1,4 @@
-module github.com/tlscensus/tlscensus
+module github.com/connectedinformation/tlscensus
 
 go 1.25.0
 

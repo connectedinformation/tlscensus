@@ -10,8 +10,8 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/tlscensus/tlscensus/internal/assemble"
-	"github.com/tlscensus/tlscensus/internal/inventory"
+	"github.com/connectedinformation/tlscensus/internal/assemble"
+	"github.com/connectedinformation/tlscensus/internal/inventory"
 )
 
 // Report is the complete output of one run.

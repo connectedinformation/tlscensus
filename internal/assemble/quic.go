@@ -8,8 +8,8 @@ import (
 	"github.com/gopacket/gopacket"
 	"github.com/gopacket/gopacket/layers"
 
-	"github.com/tlscensus/tlscensus/internal/quic"
-	"github.com/tlscensus/tlscensus/internal/tlsparse"
+	"github.com/connectedinformation/tlscensus/internal/quic"
+	"github.com/connectedinformation/tlscensus/internal/tlsparse"
 )
 
 // QUIC carries the same TLS handshake as TCP does, so the same parser reads

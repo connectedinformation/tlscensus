@@ -23,7 +23,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/reassembly"
 
-	"github.com/tlscensus/tlscensus/internal/tlsparse"
+	"github.com/connectedinformation/tlscensus/internal/tlsparse"
 )
 
 // Defaults chosen for endpoint inventory rather than for bulk capture.

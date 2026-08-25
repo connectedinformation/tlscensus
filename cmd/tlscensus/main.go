@@ -25,7 +25,7 @@ func init() {
 // resolveVersion recovers a useful version for a binary built without
 // release ldflags.
 //
-// `go install github.com/tlscensus/tlscensus/cmd/tlscensus@v0.1.0` applies
+// `go install github.com/connectedinformation/tlscensus/cmd/tlscensus@v0.1.0` applies
 // no ldflags, so without this every such build reports "dev" — and a bug
 // report saying "tlscensus dev" identifies nothing. The module version is
 // embedded by the toolchain and says exactly what was installed; a build

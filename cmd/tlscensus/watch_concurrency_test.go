@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tlscensus/tlscensus/internal/assemble"
-	"github.com/tlscensus/tlscensus/internal/capture"
-	"github.com/tlscensus/tlscensus/internal/inventory"
+	"github.com/connectedinformation/tlscensus/internal/assemble"
+	"github.com/connectedinformation/tlscensus/internal/capture"
+	"github.com/connectedinformation/tlscensus/internal/inventory"
 )
 
 // concurrentPcap holds connections that never close, so they are released by

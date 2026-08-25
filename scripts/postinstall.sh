@@ -32,6 +32,6 @@ which is off by default. Note that setcap is lost whenever the binary is
 replaced, so it must be reapplied after every upgrade.
 
 See /usr/share/doc/tlscensus/permissions.md, or:
-https://github.com/tlscensus/tlscensus/blob/main/docs/permissions.md
+https://github.com/connectedinformation/tlscensus/blob/main/docs/permissions.md
 
 EOF

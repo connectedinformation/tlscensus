@@ -4,9 +4,9 @@ import (
 	"io"
 	"testing"
 
-	"github.com/tlscensus/tlscensus/internal/assemble"
-	"github.com/tlscensus/tlscensus/internal/capture"
-	"github.com/tlscensus/tlscensus/internal/inventory"
+	"github.com/connectedinformation/tlscensus/internal/assemble"
+	"github.com/connectedinformation/tlscensus/internal/capture"
+	"github.com/connectedinformation/tlscensus/internal/inventory"
 )
 
 // End-to-end over the committed sample capture. Regenerate the capture with

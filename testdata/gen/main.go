@@ -26,7 +26,7 @@ import (
 	"github.com/gopacket/gopacket/layers"
 	"github.com/gopacket/gopacket/pcapgo"
 
-	"github.com/tlscensus/tlscensus/internal/tlssynth"
+	"github.com/connectedinformation/tlscensus/internal/tlssynth"
 )
 
 // Named groups and cipher suites, spelled out so the generator reads as a

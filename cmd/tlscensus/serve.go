@@ -13,9 +13,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/tlscensus/tlscensus/internal/assemble"
-	"github.com/tlscensus/tlscensus/internal/capture"
-	"github.com/tlscensus/tlscensus/internal/report"
+	"github.com/connectedinformation/tlscensus/internal/assemble"
+	"github.com/connectedinformation/tlscensus/internal/capture"
+	"github.com/connectedinformation/tlscensus/internal/report"
 )
 
 // The report names every host the captured traffic contacted. That is
