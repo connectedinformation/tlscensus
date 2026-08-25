@@ -41,10 +41,13 @@ type Summary struct {
 	// rather than counted as failures.
 	PQReadiness float64 `json:"pq_readiness"`
 
-	// ECHFlows counts handshakes whose server_name is a public outer name.
-	// Reported separately because their hostnames are not real
-	// destinations and must not be read as such.
-	ECHFlows int `json:"ech_flows"`
+	// ECHOffered counts handshakes carrying an encrypted_client_hello
+	// extension. Most are GREASE, so this is not a count of hidden
+	// destinations — see Record.ECH.
+	ECHOffered int `json:"ech_offered"`
+	// ECHLikelyGREASE counts destinations where a config_id that varies
+	// across connections shows the extension was a decoy.
+	ECHLikelyGREASE int `json:"ech_likely_grease"`
 
 	Findings []FindingCount `json:"findings"`
 
@@ -126,8 +129,11 @@ func (a *Accumulator) Add(r *Record) {
 		a.ja4[r.JA4]++
 	}
 	if r.ECH {
-		a.s.ECHFlows++
-	} else if r.ServerName != "" {
+		a.s.ECHOffered++
+	}
+	// Counted either way. Excluding ECH flows discarded real hostnames,
+	// because the extension is usually GREASE and the name usually genuine.
+	if r.ServerName != "" {
 		a.names[r.ServerName]++
 	}
 	a.pq[r.PQ]++
@@ -169,6 +175,11 @@ func (a *Accumulator) Summary(topN int) Summary {
 		s.PQReadiness = float64(a.pqDone) / float64(a.pqDecided)
 	}
 
+	for _, agg := range a.Aggregates(0) {
+		if agg.ECHLikelyGREASE {
+			s.ECHLikelyGREASE += agg.Count
+		}
+	}
 	s.DistinctFindings = len(a.aggs)
 	s.AggregatesDropped = a.aggDropped
 	s.Findings = make([]FindingCount, 0, len(a.findings))

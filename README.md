@@ -158,10 +158,18 @@ look".
 **GREASE is stripped** (RFC 8701), so the report does not fill with phantom
 `0x8a8a` cipher suites from every Chrome connection.
 
-**ECH is flagged, not silently mis-recorded.** When `encrypted_client_hello`
-is present the visible SNI is the provider's public outer name. Recording it
-as the destination is not a degraded reading, it is a wrong one, so those
-flows are counted separately and kept out of hostname distributions.
+**ECH presence is reported without being over-read.** An
+`encrypted_client_hello` extension does *not* prove the server name is a
+decoy. Chrome sends a GREASE ECH extension on connections where no ECH config
+exists, deliberately shaped to be indistinguishable from the real thing so
+middleboxes cannot learn to reject it — and in practice most of what carries
+the extension is GREASE, with a perfectly genuine server name.
+
+A passive observer cannot tell them apart from the extension alone. What it
+can do is watch `config_id`: a real config published in DNS is stable across
+connections, GREASE randomises it, so variation is evidence of GREASE. Names
+are reported and counted either way, marked `(ech?)` only where GREASE has
+not been established.
 
 **TLS 1.2 groups are read from ServerKeyExchange**, the only place a 1.2
 handshake names its key exchange group.

@@ -240,7 +240,7 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   <tbody>
   {{range .Aggregates}}
   <tr>
-    <td title="{{.ServerName}}">{{if .ServerName}}{{.ServerName}}{{else}}{{.ServerIP}}{{end}}{{if .ECH}} <span class="finding-count">(ech)</span>{{end}}</td>
+    <td title="{{.ServerName}}">{{if .ServerName}}{{.ServerName}}{{else}}{{.ServerIP}}{{end}}{{if and .ECH (not .ECHLikelyGREASE)}} <span class="finding-count" title="encrypted_client_hello present; real ECH is indistinguishable from GREASE to a passive observer, so this name may not be the destination">(ech?)</span>{{end}}</td>
     <td class="num">{{.ServerPort}}{{if eq .Transport "quic"}} <span class="finding-count">quic</span>{{end}}</td>
     <td>{{if .ServerObserved}}{{.Version}}{{else}}no response{{end}}</td>
     <td title="{{.CipherSuite}}">{{if .CipherSuite}}{{.CipherSuite}}{{else}}—{{end}}</td>

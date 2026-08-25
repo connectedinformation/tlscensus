@@ -23,7 +23,7 @@ const (
 	FindingSHA1Signature      = "sha1_signature"
 	FindingCompressionOffered = "compression_offered"
 	FindingClassicalKeyExch   = "classical_key_exchange"
-	FindingECHInUse           = "ech_in_use"
+	FindingECHOffered         = "ech_offered"
 	FindingWeakCertKey        = "weak_certificate_key"
 	FindingCertExpired        = "certificate_expired"
 	FindingCertSHA1           = "certificate_sha1_signature"
@@ -123,8 +123,13 @@ func findings(f *assemble.Flow, r *Record, cipher tlsparse.CipherProperties) []F
 
 	// --- ECH --------------------------------------------------------------
 	if f.Client.ECH != nil {
-		add(FindingECHInUse, SevInfo,
-			"encrypted_client_hello present; server_name %q is the public outer name, not the destination",
+		// Deliberately not claiming the name is a decoy: GREASE ECH is
+		// indistinguishable from real ECH to a passive observer, and most
+		// of what carries this extension is GREASE, so calling the name
+		// unreliable is wrong far more often than it is right.
+		add(FindingECHOffered, SevInfo,
+			"encrypted_client_hello present for %q; real ECH is indistinguishable from GREASE "+
+				"to a passive observer, so this may or may not be the destination",
 			f.Client.ServerName)
 	}
 

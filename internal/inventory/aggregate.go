@@ -48,6 +48,13 @@ type Aggregate struct {
 	JA4s []string `json:"ja4s,omitempty"`
 	PQ   PQStatus `json:"pq_status"`
 	ECH  bool     `json:"ech,omitempty"`
+	// ECHConfigIDs is how many distinct config_ids were seen for this
+	// destination. More than one, across more than one connection, means
+	// the extension was GREASE: a real ECH config has a stable id.
+	ECHConfigIDs int `json:"ech_config_ids,omitempty"`
+	// ECHLikelyGREASE is that inference. When true the server name is a
+	// genuine destination despite the extension being present.
+	ECHLikelyGREASE bool `json:"ech_likely_grease,omitempty"`
 
 	ServerObserved bool `json:"server_observed"`
 
@@ -90,10 +97,11 @@ type aggKey struct {
 // another — so it is counted within the aggregate instead.
 
 type aggEntry struct {
-	agg      Aggregate
-	clients  map[netip.Addr]struct{}
-	findings map[string]struct{}
-	ja4s     map[string]struct{}
+	agg       Aggregate
+	clients   map[netip.Addr]struct{}
+	findings  map[string]struct{}
+	ja4s      map[string]struct{}
+	echConfig map[uint8]struct{}
 }
 
 func keyOf(r *Record) aggKey {
@@ -125,9 +133,10 @@ func (a *Accumulator) addAggregate(r *Record) {
 				PQ: r.PQ, ECH: r.ECH, ServerObserved: r.ServerObserved,
 				FirstSeen: r.FirstSeen, LastSeen: r.LastSeen,
 			},
-			clients:  map[netip.Addr]struct{}{},
-			findings: map[string]struct{}{},
-			ja4s:     map[string]struct{}{},
+			clients:   map[netip.Addr]struct{}{},
+			findings:  map[string]struct{}{},
+			ja4s:      map[string]struct{}{},
+			echConfig: map[uint8]struct{}{},
 		}
 		a.aggs[k] = e
 	}
@@ -143,6 +152,9 @@ func (a *Accumulator) addAggregate(r *Record) {
 		e.clients[r.ClientIP] = struct{}{}
 	} else if _, seen := e.clients[r.ClientIP]; !seen {
 		e.agg.ClientsCapped = true
+	}
+	if r.ECH && len(e.echConfig) < maxTrackedClients {
+		e.echConfig[r.ECHConfigID] = struct{}{}
 	}
 	if r.JA4 != "" && len(e.ja4s) < maxTrackedClients {
 		e.ja4s[r.JA4] = struct{}{}
@@ -162,6 +174,11 @@ func (a *Accumulator) Aggregates(topN int) []Aggregate {
 	for _, e := range a.aggs {
 		agg := e.agg
 		agg.Clients = len(e.clients)
+		agg.ECHConfigIDs = len(e.echConfig)
+		// A stable id across several connections is consistent with a real
+		// published config; a varying one is not. One connection proves
+		// nothing either way.
+		agg.ECHLikelyGREASE = agg.ECH && agg.Count > 1 && agg.ECHConfigIDs > 1
 		agg.JA4s = make([]string, 0, len(e.ja4s))
 		for f := range e.ja4s {
 			agg.JA4s = append(agg.JA4s, f)

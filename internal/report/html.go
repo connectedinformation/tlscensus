@@ -167,10 +167,14 @@ func buildView(r *Report, aggregates []inventory.Aggregate) *htmlView {
 		{Label: "Connections examined", Value: compact(int(r.Stats.Streams)),
 			Note: fmt.Sprintf("%s discarded as non-TLS", compact(int(r.Stats.RejectedTCP)))},
 	}
-	if s.ECHFlows > 0 {
+	if s.ECHOffered > 0 {
+		note := "mostly GREASE — real ECH is indistinguishable to an observer"
+		if s.ECHLikelyGREASE > 0 {
+			note = fmt.Sprintf("%s shown to be GREASE by a varying config_id",
+				compact(s.ECHLikelyGREASE))
+		}
 		v.Tiles = append(v.Tiles, htmlTile{
-			Label: "Encrypted ClientHello", Value: compact(s.ECHFlows),
-			Note: "server names are the provider's, not the destination's",
+			Label: "ECH extension seen", Value: compact(s.ECHOffered), Note: note,
 		})
 	}
 
@@ -208,8 +212,7 @@ func buildView(r *Report, aggregates []inventory.Aggregate) *htmlView {
 		distSection("Key exchange group", "negotiated", s.Groups, s.ServerObserved),
 		distSection("Transport", "", s.Transports, s.Flows),
 		distSection("ALPN", "", s.ALPN, s.Flows),
-		distSection("Server name", "ECH flows excluded — their names are not destinations",
-			s.ServerName, s.Flows),
+		distSection("Server name", "", s.ServerName, s.Flows),
 		distSection("Client fingerprint", "JA4", s.JA4, s.Flows),
 	}
 	return v

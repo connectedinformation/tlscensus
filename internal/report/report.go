@@ -72,9 +72,13 @@ func WriteText(w io.Writer, r *Report) error {
 		fmt.Fprintf(w, "PQ readiness:     %.1f%% of observed negotiations used a post-quantum group\n",
 			s.PQReadiness*100)
 	}
-	if s.ECHFlows > 0 {
-		fmt.Fprintf(w, "ECH in use:       %d flows (server_name is a public outer name, not the destination)\n",
-			s.ECHFlows)
+	if s.ECHOffered > 0 {
+		fmt.Fprintf(w, "ECH extension:    %d handshakes carried one",
+			s.ECHOffered)
+		if s.ECHLikelyGREASE > 0 {
+			fmt.Fprintf(w, "; %d shown to be GREASE by a varying config_id", s.ECHLikelyGREASE)
+		}
+		fmt.Fprintln(w, "\n                  (real ECH is indistinguishable from GREASE to a passive observer)")
 	}
 	fmt.Fprintln(w)
 
@@ -96,8 +100,11 @@ func WriteText(w io.Writer, r *Report) error {
 			if name == "" {
 				name = a.ServerIP.String()
 			}
-			if a.ECH {
-				name += " (ech)"
+			// Only flag the name as questionable when GREASE has not been
+			// ruled in. Marking every ECH extension implies the hostname
+			// is a decoy, which is wrong for most of them.
+			if a.ECH && !a.ECHLikelyGREASE {
+				name += " (ech?)"
 			}
 			version, cipher, group := a.Version, a.CipherSuite, a.Group
 			if !a.ServerObserved {
@@ -198,7 +205,7 @@ func FlowLine(r *inventory.Record) string {
 	case name == "":
 		name = r.ServerIP.String()
 	case r.ECH:
-		name += " (ech)"
+		name += " (ech?)"
 	}
 
 	version, cipher, group := r.Version, r.CipherSuite, r.Group

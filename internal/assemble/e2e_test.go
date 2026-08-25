@@ -2,7 +2,9 @@ package assemble_test
 
 import (
 	"io"
+	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/connectedinformation/tlscensus/internal/assemble"
 	"github.com/connectedinformation/tlscensus/internal/capture"
@@ -195,13 +197,73 @@ func TestECHIsFlagged(t *testing.T) {
 		acc.Add(rec)
 	}
 	s := acc.Summary(0)
-	if s.ECHFlows != 1 {
-		t.Errorf("Summary.ECHFlows = %d, want 1", s.ECHFlows)
+	if s.ECHOffered != 1 {
+		t.Errorf("Summary.ECHOffered = %d, want 1", s.ECHOffered)
 	}
+
+	// This assertion is deliberately the opposite of what it used to be.
+	//
+	// The name used to be withheld from the distribution on the grounds
+	// that an ECH server name is a provider decoy. That is true of real
+	// ECH and false of GREASE, which is most of what carries the extension
+	// — Chrome sends a decoy on connections where no ECH config exists,
+	// shaped to be indistinguishable from the real thing. Withholding the
+	// name discarded genuine hostnames: on a real capture it silently
+	// dropped half of them.
+	var found bool
 	for _, c := range s.ServerName {
 		if c.Name == "cloudflare-ech.com" {
-			t.Error("an ECH outer name leaked into the server name distribution")
+			found = true
 		}
+	}
+	if !found {
+		t.Error("an ECH server name was withheld from the distribution; " +
+			"presence of the extension does not prove the name is a decoy")
+	}
+}
+
+// A config_id that varies across connections to one destination cannot come
+// from a published ECH config, which is stable. That is the only
+// discriminator available without an active DNS lookup.
+func TestVaryingConfigIDInfersGREASE(t *testing.T) {
+	rec := func(configID uint8) *inventory.Record {
+		return &inventory.Record{
+			Transport: "tcp", FirstSeen: time.Now(), LastSeen: time.Now(),
+			ClientIP: netip.MustParseAddr("192.0.2.1"),
+			ServerIP: netip.MustParseAddr("192.0.2.2"), ServerPort: 443,
+			ServerName: "claude.ai", ServerObserved: true,
+			Version: "TLS 1.3", CipherSuite: "TLS_AES_128_GCM_SHA256",
+			Group: "X25519MLKEM768", PQ: inventory.PQNegotiated,
+			ECH: true, ECHConfigID: configID,
+		}
+	}
+
+	varying := inventory.NewAccumulator()
+	varying.Add(rec(11))
+	varying.Add(rec(200))
+	a := varying.Aggregates(0)
+	if len(a) != 1 {
+		t.Fatalf("got %d findings, want 1", len(a))
+	}
+	if !a[0].ECHLikelyGREASE {
+		t.Error("a config_id that changed between connections was not inferred as GREASE")
+	}
+
+	// A stable id is consistent with a real published config, so no claim
+	// either way is made.
+	stable := inventory.NewAccumulator()
+	stable.Add(rec(7))
+	stable.Add(rec(7))
+	b := stable.Aggregates(0)
+	if b[0].ECHLikelyGREASE {
+		t.Error("a stable config_id was wrongly inferred as GREASE")
+	}
+
+	// One connection proves nothing.
+	single := inventory.NewAccumulator()
+	single.Add(rec(7))
+	if single.Aggregates(0)[0].ECHLikelyGREASE {
+		t.Error("a single connection was enough to infer GREASE; it is not")
 	}
 }
 

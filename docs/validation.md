@@ -57,8 +57,9 @@ post-quantum group without sending a key share for it.
 
 ## The gap CI cannot close
 
-Ten defects have now reached a green CI run and been caught only by using
-the thing — nine against a real interface, one by questioning the data model.
+Eleven defects have now reached a green CI run and been caught only by
+using the thing — nine against a real interface, one by questioning the data
+model, and one by reading a report of real traffic closely.
 That is the strongest evidence in this repository for what the automated
 suite does and does not cover.
 
@@ -165,6 +166,21 @@ a Bluetooth radio would claim to be up. That had to be run.
     aggregated?" surfaced a leak that no test would have failed on, because
     no test runs for hours. Design review and use are different instruments,
     and this project has now been corrected by both.
+
+11. An `encrypted_client_hello` extension was treated as proof that the
+    server name was a provider decoy: the name was marked, excluded from the
+    hostname distribution, and a finding was raised saying it was not the
+    destination. Most of what carries that extension is GREASE — a decoy
+    Chrome sends where no ECH config exists, designed to be
+    indistinguishable from real ECH — so the name is usually genuine. On a
+    5,296-handshake capture this silently withheld 49% of hostnames and
+    raised 2,602 findings that were almost all false.
+
+    The synthetic test could not have caught it: `testdata/sample.pcap` uses
+    `cloudflare-ech.com` as the outer name, which is what real ECH looks
+    like, so the code was only ever exercised on the case where its
+    assumption holds. It took a capture of ordinary browsing, and a DNS
+    check showing none of the named hosts publish an `ech=` parameter.
 
 ### What the pattern says
 

@@ -95,10 +95,25 @@ type Record struct {
 	ServerPort uint16     `json:"server_port"`
 
 	ServerName string `json:"server_name,omitempty"`
-	// ECH reports that encrypted_client_hello was present, which means
-	// ServerName is the provider's public name and not the real
-	// destination. Consumers must not fold these into hostname counts.
+	// ECH reports that an encrypted_client_hello extension was present.
+	//
+	// It does not mean ServerName is unreliable. Chrome sends a decoy ECH
+	// extension on connections where no ECH config exists — GREASE,
+	// deliberately shaped to be indistinguishable from the real thing so
+	// middleboxes cannot learn to reject it. A passive observer cannot tell
+	// the two apart from the extension alone; that is its design goal.
+	//
+	// In practice most of what carries this extension is GREASE and the
+	// server name is genuine, so treating presence as proof discards real
+	// hostnames on a false premise.
 	ECH bool `json:"ech,omitempty"`
+
+	// ECHConfigID is the config_id from the extension. Real ECH reuses the
+	// id published in DNS, so repeated connections to one host carry the
+	// same value; GREASE randomises it. Variation across connections is
+	// therefore evidence of GREASE — the only discriminator available
+	// without an active DNS lookup, and only in aggregate.
+	ECHConfigID uint8 `json:"ech_config_id,omitempty"`
 
 	VersionOffered string `json:"version_offered"`
 	Version        string `json:"version,omitempty"`
@@ -187,6 +202,10 @@ func Analyze(f *assemble.Flow) *Record {
 			r.GroupSource = sh.GroupSource
 		}
 		r.Certificates = analyzeCerts(sh.CertificateChain)
+	}
+
+	if ch.ECH != nil {
+		r.ECHConfigID = ch.ECH.ConfigID
 	}
 
 	r.PQ = pqStatus(f)
