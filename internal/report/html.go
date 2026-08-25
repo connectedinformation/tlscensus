@@ -72,7 +72,7 @@ type htmlView struct {
 	LadderTotal int
 	Findings    []htmlFinding
 	Sections    []htmlSection
-	Records     []*inventory.Record
+	Aggregates  []inventory.Aggregate
 	Truncated   int
 	// Refresh, when non-zero, emits a meta refresh so a live capture's page
 	// updates itself. A meta tag rather than script: the page must stay
@@ -81,9 +81,10 @@ type htmlView struct {
 	Live    bool
 }
 
-// maxHTMLRows bounds the flow table. A busy host produces tens of thousands
-// of handshakes and a browser will not render them usefully; the count of
-// what was dropped is shown rather than silently truncating.
+// maxHTMLRows bounds the inventory table. Aggregates are far fewer than
+// handshakes — a busy host contacts orders of magnitude fewer distinct
+// destinations than it opens connections — so this is rarely reached, and
+// what it drops is counted rather than silently truncated.
 const maxHTMLRows = 2000
 
 // pqLadder is the readiness ladder in order, worst to best. Rendering it as
@@ -111,33 +112,33 @@ var severityClass = map[inventory.Severity]struct{ class, icon string }{
 
 // WriteHTML renders a self-contained report page.
 func WriteHTML(w io.Writer, r *Report, records []*inventory.Record) error {
-	return htmlTmpl.Execute(w, buildView(r, records))
+	return htmlTmpl.Execute(w, buildView(r, r.Aggregates))
 }
 
 // WriteLiveHTML renders the page with a refresh interval, for a capture
 // still in progress.
 func WriteLiveHTML(w io.Writer, r *Report, records []*inventory.Record, refreshSeconds int) error {
-	v := buildView(r, records)
+	v := buildView(r, r.Aggregates)
 	v.Refresh = refreshSeconds
 	v.Live = true
 	return htmlTmpl.Execute(w, v)
 }
 
-func buildView(r *Report, records []*inventory.Record) *htmlView {
+func buildView(r *Report, aggregates []inventory.Aggregate) *htmlView {
 	s := r.Summary
 	v := &htmlView{
-		Report:    r,
-		Generated: r.GeneratedAt.Format(time.RFC1123),
-		Records:   records,
+		Report:     r,
+		Generated:  r.GeneratedAt.Format(time.RFC1123),
+		Aggregates: aggregates,
 	}
 	if !s.FirstSeen.IsZero() {
 		v.Window = fmt.Sprintf("%s — %s",
 			s.FirstSeen.UTC().Format("2006-01-02 15:04:05"),
 			s.LastSeen.UTC().Format("15:04:05 MST"))
 	}
-	if len(records) > maxHTMLRows {
-		v.Truncated = len(records) - maxHTMLRows
-		v.Records = records[:maxHTMLRows]
+	if len(aggregates) > maxHTMLRows {
+		v.Truncated = len(aggregates) - maxHTMLRows
+		v.Aggregates = aggregates[:maxHTMLRows]
 	}
 
 	// Exactly one hero figure. Readiness is the number this tool exists to

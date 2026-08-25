@@ -81,10 +81,13 @@ func runWatch(args []string) error {
 		}
 	}
 
+	// Nothing here needs the event log: text streams a line per handshake as
+	// it completes, and the closing summary is built from aggregates. A
+	// capture that runs for hours must not accumulate a record per flow.
 	p := newPipeline(assemble.Options{
 		MaxStreamPrefix: *maxPrefix,
 		MaxStreams:      *maxStreams,
-	}, format != "ndjson", onRecord)
+	}, false, onRecord)
 
 	if format == "text" {
 		fmt.Fprintf(os.Stderr, "tlscensus: capturing on %s", src.Name())

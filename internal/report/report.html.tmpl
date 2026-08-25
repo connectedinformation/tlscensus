@@ -229,30 +229,31 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 {{end}}{{end}}
 </div>
 
-{{if .Records}}
-<h2>Handshakes</h2>
-<input type="search" id="flowFilter" placeholder="Filter by name, cipher, group…" aria-label="Filter handshakes">
+{{if .Aggregates}}
+<h2>Inventory <span style="text-transform:none;letter-spacing:0;font-weight:400">— {{.Report.Summary.DistinctFindings}} distinct findings from {{.Report.Summary.Flows}} handshakes</span></h2>
+<input type="search" id="flowFilter" placeholder="Filter by name, cipher, group…" aria-label="Filter findings">
 <table class="flows" id="flowTable">
   <thead><tr>
-    <th>Server name</th><th>Destination</th><th>Version</th>
-    <th>Cipher suite</th><th>Group</th><th>PQ</th><th>JA4</th>
+    <th>Destination</th><th>Port</th><th>Version</th>
+    <th>Cipher suite</th><th>Group</th><th>PQ</th><th>Seen</th><th>Clients</th>
   </tr></thead>
   <tbody>
-  {{range .Records}}
+  {{range .Aggregates}}
   <tr>
-    <td title="{{.ServerName}}">{{if .ServerName}}{{.ServerName}}{{else}}—{{end}}{{if .ECH}} <span class="finding-count">(ech)</span>{{end}}</td>
-    <td class="num">{{.ServerIP}}:{{.ServerPort}}</td>
-    <td>{{if .ServerObserved}}{{.Version}}{{else}}{{.VersionOffered}} offered{{end}}</td>
+    <td title="{{.ServerName}}">{{if .ServerName}}{{.ServerName}}{{else}}{{.ServerIP}}{{end}}{{if .ECH}} <span class="finding-count">(ech)</span>{{end}}</td>
+    <td class="num">{{.ServerPort}}{{if eq .Transport "quic"}} <span class="finding-count">quic</span>{{end}}</td>
+    <td>{{if .ServerObserved}}{{.Version}}{{else}}no response{{end}}</td>
     <td title="{{.CipherSuite}}">{{if .CipherSuite}}{{.CipherSuite}}{{else}}—{{end}}</td>
     <td>{{if .Group}}{{.Group}}{{else}}—{{end}}</td>
     <td>{{.PQ}}</td>
-    <td class="num">{{.JA4}}</td>
+    <td class="num">{{.Count}}</td>
+    <td class="num">{{len .JA4s}}</td>
   </tr>
   {{end}}
   </tbody>
 </table>
-{{if .Truncated}}<p class="meta">{{.Truncated}} further handshakes omitted from this table; the
-summary above counts all of them. Use <code>-o ndjson</code> for the complete set.</p>{{end}}
+{{if .Truncated}}<p class="meta">{{.Truncated}} further distinct findings omitted from this
+table; the summary above counts all of them. Use <code>-o json</code> for the complete set.</p>{{end}}
 {{end}}
 
 <footer>

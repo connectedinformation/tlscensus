@@ -47,6 +47,11 @@ type Summary struct {
 	ECHFlows int `json:"ech_flows"`
 
 	Findings []FindingCount `json:"findings"`
+
+	// DistinctFindings is how many aggregates the flows collapsed to. The
+	// ratio to Flows is a measure of how repetitive the traffic is.
+	DistinctFindings  int `json:"distinct_findings"`
+	AggregatesDropped int `json:"aggregates_dropped,omitempty"`
 }
 
 // Accumulator builds a Summary incrementally.
@@ -63,6 +68,9 @@ type Accumulator struct {
 	findings  map[string]*FindingCount
 	pqDecided int
 	pqDone    int
+
+	aggs       map[aggKey]*aggEntry
+	aggDropped int
 }
 
 // NewAccumulator returns an empty Accumulator.
@@ -77,12 +85,14 @@ func NewAccumulator() *Accumulator {
 		names:     map[string]int{},
 		pq:        map[PQStatus]int{},
 		findings:  map[string]*FindingCount{},
+		aggs:      map[aggKey]*aggEntry{},
 	}
 }
 
 // Add folds one record into the summary.
 func (a *Accumulator) Add(r *Record) {
 	a.s.Flows++
+	a.addAggregate(r)
 	if a.s.FirstSeen.IsZero() || r.FirstSeen.Before(a.s.FirstSeen) {
 		a.s.FirstSeen = r.FirstSeen
 	}
@@ -159,6 +169,8 @@ func (a *Accumulator) Summary(topN int) Summary {
 		s.PQReadiness = float64(a.pqDone) / float64(a.pqDecided)
 	}
 
+	s.DistinctFindings = len(a.aggs)
+	s.AggregatesDropped = a.aggDropped
 	s.Findings = make([]FindingCount, 0, len(a.findings))
 	for _, fc := range a.findings {
 		s.Findings = append(s.Findings, *fc)

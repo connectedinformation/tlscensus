@@ -56,7 +56,10 @@ func runServe(args []string) error {
 	}
 
 	opts := assemble.Options{MaxStreamPrefix: *maxPrefix, MaxStreams: *maxStreams}
-	p := newPipeline(opts, true, nil)
+	// Records are deliberately not retained. serve runs indefinitely on a
+	// live interface, so keeping one per handshake grows without bound —
+	// and every view it renders is built from aggregates anyway.
+	p := newPipeline(opts, false, nil)
 
 	var sources []string
 	var src capture.Source

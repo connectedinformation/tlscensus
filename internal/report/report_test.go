@@ -48,6 +48,7 @@ func sampleReport(t *testing.T) (*report.Report, []*inventory.Record) {
 		Sources:     []string{"sample.pcap"},
 		Stats:       asm.Stats(),
 		Summary:     acc.Summary(15),
+		Aggregates:  acc.Aggregates(0),
 	}, records
 }
 
@@ -208,5 +209,89 @@ func TestHTMLEscapesHostileServerName(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("hostile input was dropped rather than escaped: expected %q", want)
 		}
+	}
+}
+
+// An inventory is a set, not a log: handshakes that differ only in client
+// port and millisecond are one finding, not many.
+func TestAggregationCollapsesRepeats(t *testing.T) {
+	rep, records := sampleReport(t)
+	if len(rep.Aggregates) == 0 {
+		t.Fatal("no aggregates produced")
+	}
+	if len(rep.Aggregates) > len(records) {
+		t.Errorf("%d aggregates from %d records", len(rep.Aggregates), len(records))
+	}
+
+	total := 0
+	for _, a := range rep.Aggregates {
+		total += a.Count
+		if a.Count < 1 {
+			t.Errorf("%s: Count = %d", a.ServerName, a.Count)
+		}
+		if a.LastSeen.Before(a.FirstSeen) {
+			t.Errorf("%s: LastSeen before FirstSeen", a.ServerName)
+		}
+	}
+	// Every handshake must be accounted for by exactly one aggregate;
+	// an inventory that loses events while collapsing them is worse than
+	// one that does not collapse at all.
+	if total != len(records) {
+		t.Errorf("aggregate counts sum to %d, want %d", total, len(records))
+	}
+}
+
+// JA4 must not split the key. It did once, and a host reached with several
+// client configurations produced a separate single-count row for each,
+// identical in every displayed column because the fingerprints differed
+// invisibly.
+func TestClientFingerprintDoesNotSplitFindings(t *testing.T) {
+	base := func(ja4 string, port uint16) *inventory.Record {
+		return &inventory.Record{
+			Transport: "tcp", FirstSeen: time.Now(), LastSeen: time.Now(),
+			ClientIP: netip.MustParseAddr("192.0.2.1"), ClientPort: port,
+			ServerIP: netip.MustParseAddr("192.0.2.2"), ServerPort: 443,
+			ServerName: "example.com", ServerObserved: true,
+			Version: "TLS 1.3", CipherSuite: "TLS_AES_128_GCM_SHA256",
+			Group: "X25519MLKEM768", ALPN: "h2",
+			PQ: inventory.PQNegotiated, JA4: ja4,
+		}
+	}
+	acc := inventory.NewAccumulator()
+	acc.Add(base("t13d1516h2_aaaaaaaaaaaa_bbbbbbbbbbbb", 1001))
+	acc.Add(base("t13d1516h2_aaaaaaaaaaaa_bbbbbbbbbbbb", 1002))
+	acc.Add(base("t13d0507h2_cccccccccccc_dddddddddddd", 1003))
+
+	aggs := acc.Aggregates(0)
+	if len(aggs) != 1 {
+		t.Fatalf("got %d findings, want 1 — differing JA4 must not split a finding", len(aggs))
+	}
+	if aggs[0].Count != 3 {
+		t.Errorf("Count = %d, want 3", aggs[0].Count)
+	}
+	// The diversity is still reported, just not as separate rows.
+	if got := len(aggs[0].JA4s); got != 2 {
+		t.Errorf("distinct client fingerprints = %d, want 2", got)
+	}
+}
+
+// Different cryptography to the same host is a different finding.
+func TestDifferentCryptoSplitsFindings(t *testing.T) {
+	base := func(group string, pq inventory.PQStatus) *inventory.Record {
+		return &inventory.Record{
+			Transport: "tcp", FirstSeen: time.Now(), LastSeen: time.Now(),
+			ClientIP: netip.MustParseAddr("192.0.2.1"),
+			ServerIP: netip.MustParseAddr("192.0.2.2"), ServerPort: 443,
+			ServerName: "example.com", ServerObserved: true,
+			Version: "TLS 1.3", CipherSuite: "TLS_AES_128_GCM_SHA256",
+			Group: group, PQ: pq,
+		}
+	}
+	acc := inventory.NewAccumulator()
+	acc.Add(base("X25519MLKEM768", inventory.PQNegotiated))
+	acc.Add(base("x25519", inventory.PQClassical))
+
+	if got := len(acc.Aggregates(0)); got != 2 {
+		t.Errorf("got %d findings, want 2 — a different group is a different finding", got)
 	}
 }

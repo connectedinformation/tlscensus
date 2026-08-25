@@ -130,6 +130,7 @@ func (p *pipeline) snapshot(sources []string, top int) (*report.Report, []*inven
 		Sources:     sources,
 		Stats:       p.asm.Stats(),
 		Summary:     p.acc.Summary(top),
+		Aggregates:  p.acc.Aggregates(0),
 	}, records
 }
 
@@ -153,6 +154,7 @@ func (p *pipeline) finish(sources []string, top int, withRecords bool) *report.R
 		Sources:     sources,
 		Stats:       stats,
 		Summary:     p.acc.Summary(top),
+		Aggregates:  p.acc.Aggregates(0),
 	}
 	if withRecords {
 		rep.Records = p.records

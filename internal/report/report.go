@@ -16,13 +16,14 @@ import (
 
 // Report is the complete output of one run.
 type Report struct {
-	Tool        string              `json:"tool"`
-	Version     string              `json:"version"`
-	GeneratedAt time.Time           `json:"generated_at"`
-	Sources     []string            `json:"sources"`
-	Stats       assemble.Stats      `json:"stats"`
-	Summary     inventory.Summary   `json:"summary"`
-	Records     []*inventory.Record `json:"records,omitempty"`
+	Tool        string                `json:"tool"`
+	Version     string                `json:"version"`
+	GeneratedAt time.Time             `json:"generated_at"`
+	Sources     []string              `json:"sources"`
+	Stats       assemble.Stats        `json:"stats"`
+	Summary     inventory.Summary     `json:"summary"`
+	Aggregates  []inventory.Aggregate `json:"aggregates,omitempty"`
+	Records     []*inventory.Record   `json:"records,omitempty"`
 }
 
 // WriteJSON renders the whole report as indented JSON.
@@ -86,6 +87,41 @@ func WriteText(w io.Writer, r *Report) error {
 	section(w, "SERVER NAME", s.ServerName, s.Flows)
 	section(w, "CLIENT FINGERPRINT (JA4)", s.JA4, s.Flows)
 
+	if len(r.Aggregates) > 0 {
+		fmt.Fprintf(w, "INVENTORY  (%d distinct findings from %d handshakes)\n",
+			s.DistinctFindings, s.Flows)
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		for _, a := range r.Aggregates {
+			name := a.ServerName
+			if name == "" {
+				name = a.ServerIP.String()
+			}
+			if a.ECH {
+				name += " (ech)"
+			}
+			version, cipher, group := a.Version, a.CipherSuite, a.Group
+			if !a.ServerObserved {
+				version, cipher = "no response", "-"
+			}
+			if group == "" {
+				group = "-"
+			}
+			clients := ""
+			if n := len(a.JA4s); n > 1 {
+				clients = fmt.Sprintf("  %d clients", n)
+			}
+			fmt.Fprintf(tw, "  %s\t%s\t%s\t%s\t%s\tx%d\t%s%s\n",
+				severityMark(a.Severity), name, version, cipher, group,
+				a.Count, a.PQ, clients)
+		}
+		tw.Flush()
+		if s.AggregatesDropped > 0 {
+			fmt.Fprintf(w, "  (%d further distinct findings dropped; raise the aggregate cap)\n",
+				s.AggregatesDropped)
+		}
+		fmt.Fprintln(w)
+	}
+
 	if len(s.Findings) > 0 {
 		fmt.Fprintln(w, "FINDINGS")
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
@@ -97,6 +133,20 @@ func WriteText(w io.Writer, r *Report) error {
 		fmt.Fprintln(w)
 	}
 	return nil
+}
+
+// severityMark keeps the inventory table scannable without colour, which a
+// pipe or a log would drop anyway.
+func severityMark(sev inventory.Severity) string {
+	switch sev {
+	case inventory.SevCritical:
+		return "!!"
+	case inventory.SevHigh:
+		return "! "
+	case inventory.SevMedium:
+		return "~ "
+	}
+	return "  "
 }
 
 func section(w io.Writer, title string, counts []inventory.Count, total int) {

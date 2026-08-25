@@ -197,11 +197,18 @@ than no inventory.
 
 | Format | Use |
 |---|---|
-| `text` | terminal summary (default) |
-| `ndjson` | one record per line, for `jq` or a log shipper |
+| `text` | terminal summary and inventory (default) |
+| `ndjson` | one record per **handshake**, streamed and not retained — for `jq` or a log shipper |
 | `json` | the whole report, with `-records` for per-flow detail |
 | `html` | self-contained page — no network access, no fonts, no CDN |
 | `cbom` | CycloneDX 1.6 with `cryptographic-asset` components |
+
+Everything except `ndjson` reports an **inventory**: handshakes are collapsed
+onto the destination and the cryptography negotiated with it, carrying a
+count, a time range and how many distinct client fingerprints were involved.
+Seven identical connections to one host are one finding seen seven times, not
+seven findings. `ndjson` remains the event stream, because a log pipeline
+wants to do its own windowing.
 
 The CBOM is what makes this a feed into other tooling rather than one more
 dashboard: post-quantum readiness is a property of your estate, not of this
