@@ -33,10 +33,15 @@ FINDINGS
 
 ## Status
 
-**Early. Reads capture files and captures live on Linux and macOS.**
-See [docs/roadmap.md](docs/roadmap.md) for what lands when, and
-[docs/validation.md](docs/validation.md) for what has not yet been checked
-against a reference implementation.
+**v0.1.0.** Reads capture files on any platform, captures live on Linux,
+macOS and Windows, and decodes QUIC as well as TCP. Every platform has been
+run against real hardware, not only compiled for.
+
+There is no roadmap of pending features: what remains is listed in
+[docs/validation.md](docs/validation.md) as things that have *not* been
+verified rather than things that are coming. The most useful thing anyone can
+send is a report of it getting something wrong on a network we do not have —
+see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Install
 

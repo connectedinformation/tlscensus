@@ -57,9 +57,10 @@ post-quantum group without sending a key share for it.
 
 ## The gap CI cannot close
 
-Nine defects have now reached a green CI run and been caught only by
-running against a real interface. That is the strongest evidence in this
-repository for what the automated suite does and does not cover.
+Ten defects have now reached a green CI run and been caught only by using
+the thing — nine against a real interface, one by questioning the data model.
+That is the strongest evidence in this repository for what the automated
+suite does and does not cover.
 
 ### Found on macOS
 
@@ -149,6 +150,21 @@ a Bluetooth radio would claim to be up. That had to be run.
    ServerHello under TLS 1.3, ServerHelloDone under TLS 1.2 — and covered
    by `testdata/keepalive.pcap`, which holds completed handshakes on
    connections that are never closed.
+
+10. Every completed handshake was retained for the life of the process.
+    Reading a capture file is bounded by the file; `serve -i` is meant to run
+    indefinitely, and each record carries its full offered-cipher, group and
+    signature-algorithm lists, so a busy host accumulated hundreds of
+    megabytes a day. Fixed by reporting an inventory — handshakes collapsed
+    onto the destination and the cryptography negotiated with it — and
+    retaining aggregates rather than events. `-o ndjson` still streams one
+    record per handshake and retains nothing.
+
+    Worth listing separately from the rest: this one was found by a question
+    about the data model, not by running anything. Asking "should these be
+    aggregated?" surfaced a leak that no test would have failed on, because
+    no test runs for hours. Design review and use are different instruments,
+    and this project has now been corrected by both.
 
 ### What the pattern says
 
