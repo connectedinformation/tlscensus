@@ -3,8 +3,8 @@
 **Passive TLS cryptography inventory for Linux, macOS and Windows.**
 
 Answers one question that is getting harder to avoid: *which of my machines
-are still negotiating classical-only key exchange, and what software is doing
-it?*
+are still negotiating classical-only key exchange, and with which
+destinations?*
 
 tlscensus watches TLS handshakes go by, decodes the ClientHello and
 ServerHello, and reports what cryptography is actually in use — protocol
@@ -180,14 +180,19 @@ than no inventory.
 - **QUIC connection migration, Retry and 0-RTT** are not followed. A Retry
   re-keys the connection on a new connection ID; it is detected, and the
   flow is then abandoned rather than guessed at.
-- **No process attribution yet** (M6). Flows are identified by address and
-  port, not by the application that opened them. On macOS the `pktap`
-  pseudo-device would provide this nearly free; its link type is not decoded
-  yet, so `watch` refuses it explicitly rather than capturing nothing.
-- **Windows live capture is written but unverified** (M4) — it has never
-  been run on a Windows machine, so treat it as untested. `read` works there
-  today. Live capture needs [Npcap](https://npcap.com), installed
-  separately; tlscensus loads it at runtime and does not bundle it.
+- **No process attribution.** Flows are identified by address, port and
+  client fingerprint, not by the application that opened them. JA4 usually
+  distinguishes a browser from `curl` from a Java runtime, but it names the
+  TLS stack rather than the program.
+
+  This is a deliberate omission, not a gap waiting to be filled. Attribution
+  would be nice to have; it is not worth what it costs in privilege, build
+  complexity or platform inconsistency, and the report is informative without
+  it. See [docs/roadmap.md](docs/roadmap.md) for the reasoning.
+- **Windows live capture needs [Npcap](https://npcap.com)**, installed
+  separately — its licence forbids redistribution. tlscensus loads it at
+  runtime and does not bundle it, so `read` works on Windows with nothing
+  else installed.
 - **STARTTLS is not tracked.** A session that begins as cleartext SMTP or
   IMAP and upgrades in place is not currently detected.
 - **Resumed sessions** carry no full handshake, so they report what the
